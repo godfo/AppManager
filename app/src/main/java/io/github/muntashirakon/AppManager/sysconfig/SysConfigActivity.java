@@ -2,105 +2,90 @@
 
 package io.github.muntashirakon.AppManager.sysconfig;
 
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getStyledKeyValue;
+
+import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.os.Build;
 import android.os.Bundle;
+import android.text.SpannableStringBuilder;
 import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ImageView;
-import android.widget.SpinnerAdapter;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.appcompat.widget.AppCompatSpinner;
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
+import androidx.lifecycle.ViewModelProvider;
+import androidx.recyclerview.widget.DiffUtil;
 
+import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 
 import io.github.muntashirakon.AppManager.BaseActivity;
 import io.github.muntashirakon.AppManager.R;
-import io.github.muntashirakon.AppManager.imagecache.ImageLoader;
-import io.github.muntashirakon.widget.RecyclerViewWithEmptyView;
-import me.zhanghai.android.fastscroll.FastScrollerBuilder;
+import io.github.muntashirakon.AppManager.details.AppDetailsActivity;
+import io.github.muntashirakon.AppManager.self.imagecache.ImageLoader;
+import io.github.muntashirakon.AppManager.utils.UIUtils;
+import io.github.muntashirakon.AppManager.utils.LangUtils;
+import io.github.muntashirakon.AppManager.utils.appearance.ColorCodes;
+import io.github.muntashirakon.adapters.SelectedArrayAdapter;
+import io.github.muntashirakon.util.UiUtils;
+import io.github.muntashirakon.widget.MaterialSpinner;
+import io.github.muntashirakon.widget.RecyclerView;
 
 public class SysConfigActivity extends BaseActivity {
-    private SysConfigRecyclerAdapter adapter;
-    private LinearProgressIndicator progressIndicator;
+    private SysConfigRecyclerAdapter mAdapter;
+    private LinearProgressIndicator mProgressIndicator;
     @NonNull
     @SysConfigType
-    private String type = SysConfigType.TYPE_GROUP;
-
-    private final ImageLoader imageLoader = new ImageLoader();
+    private String mType = SysConfigType.TYPE_GROUP;
+    private SysConfigViewModel mViewModel;
 
     @Override
     protected void onAuthenticated(@Nullable Bundle savedInstanceState) {
         setContentView(R.layout.activity_sys_config);
         setSupportActionBar(findViewById(R.id.toolbar));
-        AppCompatSpinner spinner = findViewById(R.id.spinner);
+        mViewModel = new ViewModelProvider(this).get(SysConfigViewModel.class);
+        MaterialSpinner spinner = findViewById(R.id.spinner);
+        UiUtils.applyWindowInsetsAsMargin(spinner, false, false);
         // Make spinner the first item to focus on
         spinner.requestFocus();
-        RecyclerViewWithEmptyView recyclerView = findViewById(R.id.recycler_view);
+        RecyclerView recyclerView = findViewById(R.id.recycler_view);
         recyclerView.setEmptyView(findViewById(android.R.id.empty));
-        progressIndicator = findViewById(R.id.progress_linear);
-        progressIndicator.setVisibilityAfterHide(View.GONE);
+        mProgressIndicator = findViewById(R.id.progress_linear);
+        mProgressIndicator.setVisibilityAfterHide(View.GONE);
 
         String[] sysConfigTypes = getResources().getStringArray(R.array.sys_config_names);
-        SpinnerAdapter intervalSpinnerAdapter = new ArrayAdapter<>(this,
-                R.layout.item_checked_text_view, android.R.id.text1, sysConfigTypes);
+        ArrayAdapter<String> intervalSpinnerAdapter = new SelectedArrayAdapter<>(this,
+                io.github.muntashirakon.ui.R.layout.auto_complete_dropdown_item_small, android.R.id.text1, sysConfigTypes);
         spinner.setAdapter(intervalSpinnerAdapter);
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                progressIndicator.show();
-                new Thread(() -> {
-                    List<SysConfigInfo> sysConfigInfoList = SysConfigWrapper.getSysConfigs(type = sysConfigTypes[position]);
-                    runOnUiThread(() -> {
-                        adapter.setList(sysConfigInfoList);
-                        progressIndicator.hide();
-                    });
-                }).start();
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
+        spinner.setOnItemClickListener((parent, view, position, id) -> {
+            mProgressIndicator.show();
+            mType = sysConfigTypes[position];
+            mViewModel.loadSysConfigInfo(mType);
         });
 
-        adapter = new SysConfigRecyclerAdapter(this);
-        recyclerView.setHasFixedSize(true);
-        recyclerView.setLayoutManager(new LinearLayoutManager(this));
-        recyclerView.setAdapter(adapter);
-        new FastScrollerBuilder(recyclerView).useMd2Style().build();
-    }
+        mAdapter = new SysConfigRecyclerAdapter(this);
+        recyclerView.setLayoutManager(UIUtils.getGridLayoutAt450Dp(this));
+        recyclerView.setAdapter(mAdapter);
+        // Observe data
+        mViewModel.getSysConfigInfoListLiveData().observe(this, sysConfigInfoList -> {
+            Optional.ofNullable(getSupportActionBar())
+                    .ifPresent(actionBar -> actionBar.setSubtitle(mType));
+            mAdapter.submitList(sysConfigInfoList);
+            mProgressIndicator.hide();
+        });
 
-    @Override
-    protected void onStart() {
-        super.onStart();
-        new Thread(() -> {
-            List<SysConfigInfo> sysConfigInfoList = SysConfigWrapper.getSysConfigs(type);
-            runOnUiThread(() -> {
-                adapter.setList(sysConfigInfoList);
-                progressIndicator.hide();
-            });
-        }).start();
-    }
-
-    @Override
-    protected void onDestroy() {
-        imageLoader.close();
-        super.onDestroy();
+        mViewModel.loadSysConfigInfo(mType);
     }
 
     @Override
@@ -112,14 +97,47 @@ public class SysConfigActivity extends BaseActivity {
         return super.onOptionsItemSelected(item);
     }
 
-    public static class SysConfigRecyclerAdapter extends RecyclerView.Adapter<SysConfigRecyclerAdapter.ViewHolder> {
-        private final List<SysConfigInfo> list = new ArrayList<>();
-        private final SysConfigActivity activity;
-        private final PackageManager pm;
+    public static class SysConfigRecyclerAdapter extends RecyclerView.ListAdapter<SysConfigInfo, SysConfigRecyclerAdapter.ViewHolder> {
+        private final SysConfigActivity mActivity;
+        private final PackageManager mPm;
+        private final int mCardColor0;
+        private final int mCardColor1;
 
-        SysConfigRecyclerAdapter(SysConfigActivity activity) {
-            this.activity = activity;
-            pm = activity.getPackageManager();
+        private static final DiffUtil.ItemCallback<SysConfigInfo> DIFF_CALLBACK = new DiffUtil.ItemCallback<SysConfigInfo>() {
+            @Override
+            public boolean areItemsTheSame(@NonNull SysConfigInfo oldItem, @NonNull SysConfigInfo newItem) {
+                // type and name should be enough here
+                return Objects.equals(oldItem.type, newItem.type) && Objects.equals(oldItem.name, newItem.name);
+            }
+
+            @Override
+            public boolean areContentsTheSame(@NonNull SysConfigInfo oldItem, @NonNull SysConfigInfo newItem) {
+                if (oldItem.isPackage != newItem.isPackage
+                        || oldItem.perUser != newItem.perUser
+                        || oldItem.targetSdk != newItem.targetSdk
+                        || oldItem.version != newItem.version
+                        || !Objects.equals(oldItem.filename, newItem.filename)) {
+                    return false;
+                }
+                // Run structural array checks
+                return Arrays.equals(oldItem.actors, newItem.actors)
+                        && Arrays.equals(oldItem.classNames, newItem.classNames)
+                        && Arrays.equals(oldItem.whitelist, newItem.whitelist)
+                        && Arrays.equals(oldItem.packages, newItem.packages)
+                        && Arrays.equals(oldItem.gids, newItem.gids)
+                        && Arrays.equals(oldItem.permissions, newItem.permissions)
+                        && Arrays.equals(oldItem.dependencies, newItem.dependencies)
+                        && Arrays.equals(oldItem.userTypes, newItem.userTypes)
+                        && Arrays.equals(oldItem.targetSdks, newItem.targetSdks);
+            }
+        };
+
+        SysConfigRecyclerAdapter(@NonNull SysConfigActivity activity) {
+            super(DIFF_CALLBACK);
+            mActivity = activity;
+            mPm = activity.getPackageManager();
+            mCardColor0 = ColorCodes.getListItemColor0(activity);
+            mCardColor1 = ColorCodes.getListItemColor1(activity);
         }
 
         @NonNull
@@ -129,48 +147,44 @@ public class SysConfigActivity extends BaseActivity {
             return new ViewHolder(view);
         }
 
-        public void setList(Collection<SysConfigInfo> list) {
-            this.list.clear();
-            this.list.addAll(list);
-            notifyDataSetChanged();
-        }
-
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-            holder.icon.setImageDrawable(null);
+            holder.itemView.setCardBackgroundColor(position % 2 == 0 ? mCardColor1 : mCardColor0);
 
-            holder.itemView.setBackgroundResource(position % 2 == 0 ? R.drawable.item_semi_transparent : R.drawable.item_transparent);
-
-            SysConfigInfo info = list.get(position);
+            SysConfigInfo info = getItem(position);
             if (info.isPackage) {
                 holder.icon.setVisibility(View.VISIBLE);
                 try {
-                    ApplicationInfo applicationInfo = pm.getApplicationInfo(info.name, 0);
-                    holder.title.setText(applicationInfo.loadLabel(pm));
+                    ApplicationInfo applicationInfo = mPm.getApplicationInfo(info.name, 0);
+                    holder.title.setText(applicationInfo.loadLabel(mPm));
                     holder.packageName.setVisibility(View.VISIBLE);
                     holder.packageName.setText(info.name);
                     // Load icon
-                    activity.imageLoader.displayImage(applicationInfo.packageName, applicationInfo, holder.icon);
+                    holder.icon.setTag(applicationInfo.packageName);
+                    ImageLoader.getInstance().displayImage(applicationInfo.packageName, applicationInfo, holder.icon);
                 } catch (PackageManager.NameNotFoundException e) {
                     holder.title.setText(info.name);
                     holder.packageName.setVisibility(View.GONE);
-                    activity.imageLoader.displayImage(info.name, null, holder.icon);
+                    holder.icon.setTag(info.name);
+                    ImageLoader.getInstance().displayImage(info.name, null, holder.icon);
                 }
+                holder.icon.setOnClickListener(v -> {
+                    Intent appDetailsIntent = AppDetailsActivity.getIntent(mActivity, info.name, 0);
+                    mActivity.startActivity(appDetailsIntent);
+                });
             } else {
                 holder.icon.setVisibility(View.GONE);
+                holder.icon.setImageDrawable(null);
+                holder.icon.setOnClickListener(null);
                 holder.title.setText(info.name);
                 holder.packageName.setVisibility(View.GONE);
             }
             setSubtitle(holder, info);
         }
 
-        @Override
-        public int getItemCount() {
-            return list.size();
-        }
-
         private void setSubtitle(@NonNull ViewHolder holder, @NonNull SysConfigInfo info) {
-            StringBuilder sb = new StringBuilder();
+            Context context = holder.itemView.getContext();
+            SpannableStringBuilder sb = new SpannableStringBuilder();
             switch (info.type) {
                 case SysConfigType.TYPE_GROUP:
                 case SysConfigType.TYPE_UNAVAILABLE_FEATURE:
@@ -192,77 +206,157 @@ public class SysConfigActivity extends BaseActivity {
                     break;
                 case SysConfigType.TYPE_PERMISSION: {
                     // TODO: Display permission info
-                    sb.append("GID: ").append(Arrays.toString(info.gids)).append("\n");
-                    sb.append("Per User: ").append(info.perUser);
+                    sb.append(getStyledKeyValue(context, "GID", Arrays.toString(info.gids))).append("\n");
+                    sb.append(getStyledKeyValue(context, "Per user", String.valueOf(info.perUser)));
                 }
                 break;
                 case SysConfigType.TYPE_ASSIGN_PERMISSION: {
                     // TODO: Display permission info
-                    sb.append("Permissions: ").append(Arrays.toString(info.permissions));
+                    sb.append(getStyledKeyValue(context, "Permissions", ""));
+                    if (info.permissions == null || info.permissions.length == 0) {
+                        sb.append(" None");
+                    } else {
+                        for (String permissionName : info.permissions) {
+                            sb.append("\n- ").append(permissionName);
+                        }
+                    }
                 }
                 break;
                 case SysConfigType.TYPE_SPLIT_PERMISSION: {
-                    sb.append("Permissions: ").append(Arrays.toString(info.permissions)).append("\n");
-                    sb.append("Target SDK: ").append(info.targetSdk);
+                    sb.append(getStyledKeyValue(context, "Target SDK", String.valueOf(info.targetSdk))).append("\n");
+                    sb.append(getStyledKeyValue(context, "Permissions", ""));
+                    if (info.permissions == null || info.permissions.length == 0) {
+                        sb.append(" None");
+                    } else {
+                        for (String permissionName : info.permissions) {
+                            sb.append("\n- ").append(permissionName);
+                        }
+                    }
                 }
                 break;
                 case SysConfigType.TYPE_LIBRARY: {
-                    sb.append("Filename: ").append(info.filename).append("\n");
-                    sb.append("Dependencies: ").append(Arrays.toString(info.dependencies));
+                    sb.append(getStyledKeyValue(context, "Filename", info.filename)).append("\n");
+                    sb.append(getStyledKeyValue(context, "Dependencies", ""));
+                    if (info.dependencies == null || info.dependencies.length == 0) {
+                        sb.append(" None");
+                    } else {
+                        for (String dependencyName : info.dependencies) {
+                            sb.append("\n- ").append(dependencyName);
+                        }
+                    }
                 }
                 break;
                 case SysConfigType.TYPE_FEATURE: {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        sb.append("Version: ").append(info.version);
+                    if (info.version > 0) {
+                        sb.append(getStyledKeyValue(context, "Version", String.valueOf(info.version)));
                     }
                 }
                 break;
                 case SysConfigType.TYPE_DEFAULT_ENABLED_VR_APP: {
-                    sb.append("Components: ").append(Arrays.toString(info.classNames));
+                    sb.append(getStyledKeyValue(context, "Components", Arrays.toString(info.classNames)));
+                    if (info.classNames == null || info.classNames.length == 0) {
+                        sb.append(" None");
+                    } else {
+                        for (String className : info.classNames) {
+                            sb.append("\n- ").append(className);
+                        }
+                    }
                 }
                 break;
                 case SysConfigType.TYPE_COMPONENT_OVERRIDE: {
-                    sb.append("Components:\n");
-                    for (int i = 0; i < info.classNames.length; ++i) {
-                        sb.append(info.classNames[i]).append(" => ").append(info.whitelist[i]).append("\n");
+                    sb.append(getStyledKeyValue(context, "Components", ""));
+                    if (info.classNames == null || info.classNames.length == 0) {
+                        sb.append(" None");
+                    } else {
+                        for (int i = 0; i < info.classNames.length; ++i) {
+                            sb.append("\n- ")
+                                    .append(info.classNames[i])
+                                    .append(" = ")
+                                    .append(info.whitelist != null && info.whitelist[i] ? "Enabled" : "Disabled");
+                        }
                     }
                 }
                 break;
                 case SysConfigType.TYPE_BACKUP_TRANSPORT_WHITELISTED_SERVICE: {
-                    sb.append("Services: ").append(Arrays.toString(info.classNames));
+                    sb.append(getStyledKeyValue(context, "Services", ""));
+                    if (info.classNames == null || info.classNames.length == 0) {
+                        sb.append(" None");
+                    } else {
+                        for (String className : info.classNames) {
+                            sb.append("\n- ").append(className);
+                        }
+                    }
                 }
                 break;
                 case SysConfigType.TYPE_DISABLED_UNTIL_USED_PREINSTALLED_CARRIER_ASSOCIATED_APP: {
-                    sb.append("Associated Packages:\n");
-                    for (int i = 0; i < info.packages.length; ++i) {
-                        // TODO Display package labels
-                        sb.append("Package: ").append(info.packages[i]).append(", Target SDK: ").append(info.targetSdks[i]).append("\n");
+                    sb.append(getStyledKeyValue(context, "Associated packages", ""));
+                    if (info.packages == null || info.packages.length == 0) {
+                        sb.append(" None");
+                    } else {
+                        for (int i = 0; i < info.packages.length; ++i) {
+                            // TODO Display package labels
+                            sb.append("\n- ")
+                                    .append("Package")
+                                    .append(LangUtils.getSeparatorString())
+                                    .append(info.packages[i])
+                                    .append(", Target SDK")
+                                    .append(LangUtils.getSeparatorString())
+                                    .append(String.valueOf(info.targetSdks != null ? info.targetSdks[i] : ""));
+                        }
                     }
                 }
                 break;
                 case SysConfigType.TYPE_PRIVAPP_PERMISSIONS:
                 case SysConfigType.TYPE_OEM_PERMISSIONS: {
-                    sb.append("Permissions:\n");
-                    for (int i = 0; i < info.permissions.length; ++i) {
-                        sb.append(info.permissions[i]).append(" => ").append(info.whitelist[i]).append("\n");
+                    sb.append(getStyledKeyValue(context, "Permissions", ""));
+                    if (info.permissions == null || info.permissions.length == 0) {
+                        sb.append(" None");
+                    } else {
+                        for (int i = 0; i < info.permissions.length; ++i) {
+                            sb.append("\n- ")
+                                    .append(info.permissions[i])
+                                    .append(" = ")
+                                    .append(info.whitelist != null && info.whitelist[i] ? "Granted" : "Revoked");
+                        }
                     }
                 }
                 break;
                 case SysConfigType.TYPE_ALLOW_ASSOCIATION: {
-                    // TODO Display package labels
-                    sb.append("Associated Packages: ").append(Arrays.toString(info.packages));
+                    sb.append(getStyledKeyValue(context, "Associated packages", ""));
+                    if (info.packages == null || info.packages.length == 0) {
+                        sb.append(" None");
+                    } else {
+                        for (String packageName : info.packages) {
+                            // TODO Display package labels
+                            sb.append("\n- ").append(packageName);
+                        }
+                    }
                 }
                 break;
                 case SysConfigType.TYPE_INSTALL_IN_USER_TYPE: {
-                    sb.append("User Types:\n");
-                    for (int i = 0; i < info.userTypes.length; ++i) {
-                        sb.append(info.userTypes[i]).append(" => ").append(info.whitelist[i]).append("\n");
+                    sb.append(getStyledKeyValue(context, "User types", ""));
+                    if (info.userTypes == null || info.userTypes.length == 0) {
+                        sb.append(" None");
+                    } else {
+                        for (int i = 0; i < info.userTypes.length; ++i) {
+                            sb.append("\n- ")
+                                    .append(info.userTypes[i])
+                                    .append(" = ")
+                                    .append(info.whitelist != null && info.whitelist[i] ? "Whitelisted" : "Blacklisted");
+                        }
                     }
                 }
                 break;
                 case SysConfigType.TYPE_NAMED_ACTOR: {
-                    for (int i = 0; i < info.actors.length; ++i) {
-                        sb.append("Actor: ").append(info.actors[i]).append(", Package: ").append(info.packages[i]).append("\n");
+                    if (info.actors != null) {
+                        for (int i = 0; i < info.actors.length; ++i) {
+                            sb.append("Actor")
+                                    .append(LangUtils.getSeparatorString())
+                                    .append(info.actors[i])
+                                    .append(", Package")
+                                    .append(LangUtils.getSeparatorString())
+                                    .append(info.packages != null ? info.packages[i] : "").append("\n");
+                        }
                     }
                 }
                 break;
@@ -274,6 +368,7 @@ public class SysConfigActivity extends BaseActivity {
         }
 
         public static class ViewHolder extends RecyclerView.ViewHolder {
+            public MaterialCardView itemView;
             public TextView title;
             public TextView packageName;
             public TextView subtitle;
@@ -281,10 +376,11 @@ public class SysConfigActivity extends BaseActivity {
 
             public ViewHolder(@NonNull View itemView) {
                 super(itemView);
-                title = itemView.findViewById(R.id.item_title);
+                this.itemView = (MaterialCardView) itemView;
+                title = itemView.findViewById(android.R.id.title);
                 packageName = itemView.findViewById(R.id.package_name);
-                subtitle = itemView.findViewById(R.id.item_subtitle);
-                icon = itemView.findViewById(R.id.item_icon);
+                subtitle = itemView.findViewById(android.R.id.summary);
+                icon = itemView.findViewById(android.R.id.icon);
             }
         }
     }

@@ -4,18 +4,15 @@ package io.github.muntashirakon.AppManager.types;
 
 import android.annotation.UserIdInt;
 import android.app.usage.StorageStats;
-import android.content.pm.PackageStats;
 import android.os.Build;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 import androidx.annotation.WorkerThread;
 
-import java.io.File;
-
 import io.github.muntashirakon.AppManager.misc.OsEnvironment;
-import io.github.muntashirakon.AppManager.utils.FileUtils;
-import io.github.muntashirakon.io.ProxyFile;
+import io.github.muntashirakon.io.Path;
+import io.github.muntashirakon.io.Paths;
 
 public class PackageSizeInfo {
     public final String packageName;
@@ -26,7 +23,7 @@ public class PackageSizeInfo {
     public final long obbSize;
 
     @SuppressWarnings("deprecation")
-    public PackageSizeInfo(@NonNull PackageStats packageStats) {
+    public PackageSizeInfo(@NonNull android.content.pm.PackageStats packageStats) {
         packageName = packageStats.packageName;
         codeSize = packageStats.codeSize + packageStats.externalCodeSize;
         dataSize = packageStats.dataSize + packageStats.externalDataSize;
@@ -53,20 +50,22 @@ public class PackageSizeInfo {
 
     @RequiresApi(Build.VERSION_CODES.O)
     private long getMediaSizeInternal(@NonNull OsEnvironment.UserEnvironment ue) {
-        ProxyFile[] files = ue.buildExternalStorageAppMediaDirs(packageName);
+        Path[] files = ue.buildExternalStorageAppMediaDirs(packageName);
         long size = 0L;
-        for (File file : files) {
-            if (file.exists()) size += FileUtils.fileSize(file);
+        for (Path file : files) {
+            if (file.exists()) size += Paths.size(file);
         }
         return size;
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
     private long getObbSizeInternal(@NonNull OsEnvironment.UserEnvironment ue) {
-        ProxyFile[] files = ue.buildExternalStorageAppObbDirs(packageName);
+        Path[] files = ue.buildExternalStorageAppObbDirs(packageName);
         long size = 0L;
-        for (File file : files) {
-            if (file.exists()) size += FileUtils.fileSize(file);
+        for (Path file : files) {
+            if (file.exists()) {
+                size += Paths.size(file);
+            }
         }
         return size;
     }

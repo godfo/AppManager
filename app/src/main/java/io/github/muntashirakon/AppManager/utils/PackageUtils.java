@@ -2,42 +2,53 @@
 
 package io.github.muntashirakon.AppManager.utils;
 
+import static io.github.muntashirakon.AppManager.compat.PackageManagerCompat.MATCH_DISABLED_COMPONENTS;
+import static io.github.muntashirakon.AppManager.compat.PackageManagerCompat.MATCH_UNINSTALLED_PACKAGES;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getBoldString;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getColoredText;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getMonospacedText;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getPrimaryText;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getStyledKeyValue;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getTitleText;
+
 import android.annotation.SuppressLint;
 import android.annotation.UserIdInt;
 import android.app.usage.IStorageStatsManager;
 import android.app.usage.StorageStats;
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ComponentInfo;
+import android.content.pm.IPackageManager;
 import android.content.pm.IPackageStatsObserver;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.PackageStats;
-import android.content.pm.Signature;
+import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.SigningInfo;
 import android.os.Build;
+import android.os.PowerManager;
 import android.os.RemoteException;
-import android.os.storage.StorageManager;
+import android.os.UserHandleHidden;
+import android.os.storage.StorageManagerHidden;
+import android.system.ErrnoException;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.util.Pair;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresPermission;
 import androidx.annotation.WorkerThread;
-import androidx.core.content.ContextCompat;
+import androidx.core.content.pm.PackageInfoCompat;
 
 import com.android.apksig.ApkVerifier;
 import com.android.apksig.apk.ApkFormatException;
-import com.android.internal.util.TextUtils;
+
+import org.jetbrains.annotations.Contract;
 
 import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.cert.CertificateEncodingException;
@@ -49,99 +60,59 @@ import java.security.interfaces.RSAPublicKey;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.ListIterator;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
-import io.github.muntashirakon.AppManager.AppManager;
+import aosp.libcore.util.EmptyArray;
+import aosp.libcore.util.HexEncoding;
 import io.github.muntashirakon.AppManager.R;
-import io.github.muntashirakon.AppManager.appops.AppOpsManager;
-import io.github.muntashirakon.AppManager.appops.AppOpsService;
-import io.github.muntashirakon.AppManager.backup.BackupUtils;
+import io.github.muntashirakon.AppManager.apk.signing.Signer;
+import io.github.muntashirakon.AppManager.apk.signing.SignerInfo;
+import io.github.muntashirakon.AppManager.compat.AppOpsManagerCompat;
+import io.github.muntashirakon.AppManager.compat.PackageManagerCompat;
 import io.github.muntashirakon.AppManager.db.entity.App;
 import io.github.muntashirakon.AppManager.db.entity.Backup;
-import io.github.muntashirakon.AppManager.ipc.IPCUtils;
+import io.github.muntashirakon.AppManager.db.utils.AppDb;
 import io.github.muntashirakon.AppManager.ipc.ProxyBinder;
-import io.github.muntashirakon.AppManager.ipc.ps.ProcessEntry;
 import io.github.muntashirakon.AppManager.logs.Log;
 import io.github.muntashirakon.AppManager.main.ApplicationItem;
-import io.github.muntashirakon.AppManager.misc.OsEnvironment;
+import io.github.muntashirakon.AppManager.misc.OidMap;
 import io.github.muntashirakon.AppManager.rules.RuleType;
 import io.github.muntashirakon.AppManager.rules.compontents.ComponentUtils;
-import io.github.muntashirakon.AppManager.rules.compontents.ComponentsBlocker;
 import io.github.muntashirakon.AppManager.runner.Runner;
 import io.github.muntashirakon.AppManager.runner.RunnerUtils;
-import io.github.muntashirakon.AppManager.servermanager.PackageManagerCompat;
-import io.github.muntashirakon.AppManager.types.PackageChangeReceiver;
+import io.github.muntashirakon.AppManager.self.SelfPermissions;
 import io.github.muntashirakon.AppManager.types.PackageSizeInfo;
 import io.github.muntashirakon.AppManager.types.UserPackagePair;
 import io.github.muntashirakon.AppManager.users.Users;
-import io.github.muntashirakon.io.ProxyFile;
-
-import static io.github.muntashirakon.AppManager.utils.UIUtils.getBoldString;
-import static io.github.muntashirakon.AppManager.utils.UIUtils.getColoredText;
-import static io.github.muntashirakon.AppManager.utils.UIUtils.getPrimaryText;
-import static io.github.muntashirakon.AppManager.utils.UIUtils.getTitleText;
+import io.github.muntashirakon.AppManager.utils.appearance.ColorCodes;
+import io.github.muntashirakon.io.ExtendedFile;
+import io.github.muntashirakon.io.Path;
+import io.github.muntashirakon.io.Paths;
+import io.github.muntashirakon.io.UidGidPair;
 
 public final class PackageUtils {
     public static final String TAG = PackageUtils.class.getSimpleName();
 
     public static final File PACKAGE_STAGING_DIRECTORY = new File("/data/local/tmp");
 
-    public static final int flagSigningInfo;
-    public static final int flagSigningInfoApk;
-    public static final int flagDisabledComponents;
-    public static final int flagMatchUninstalled;
-
-    static {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            flagSigningInfo = PackageManager.GET_SIGNING_CERTIFICATES;
-        } else {
-            //noinspection deprecation
-            flagSigningInfo = PackageManager.GET_SIGNATURES;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            flagSigningInfoApk = PackageManager.GET_SIGNING_CERTIFICATES;
-        } else {
-            //noinspection deprecation
-            flagSigningInfoApk = PackageManager.GET_SIGNATURES;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            flagDisabledComponents = PackageManager.MATCH_DISABLED_COMPONENTS;
-        } else {
-            //noinspection deprecation
-            flagDisabledComponents = PackageManager.GET_DISABLED_COMPONENTS;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            flagMatchUninstalled = PackageManager.MATCH_UNINSTALLED_PACKAGES;
-        } else {
-            //noinspection deprecation
-            flagMatchUninstalled = PackageManager.GET_UNINSTALLED_PACKAGES;
-        }
-    }
-
-    @SuppressWarnings("RegExpRedundantEscape")
-    private static final Pattern SERVICE_REGEX = Pattern.compile("ServiceRecord\\{[0-9a-f]+ u(\\d+) ([^\\}]+)\\}");
-    private static final String SERVICE_NOTHING = "(nothing)";
-
     @NonNull
     public static ArrayList<UserPackagePair> getUserPackagePairs(@NonNull List<ApplicationItem> applicationItems) {
         ArrayList<UserPackagePair> userPackagePairList = new ArrayList<>();
-        int currentUser = Users.myUserId();
+        int currentUser = UserHandleHidden.myUserId();
         for (ApplicationItem item : applicationItems) {
-            if (item.userHandles != null) {
-                for (int userHandle : item.userHandles)
-                    userPackagePairList.add(new UserPackagePair(item.packageName, userHandle));
+            if (item.userIds.length > 0) {
+                for (int userId : item.userIds)
+                    userPackagePairList.add(new UserPackagePair(item.packageName, userId));
             } else {
                 userPackagePairList.add(new UserPackagePair(item.packageName, currentUser));
             }
@@ -152,65 +123,93 @@ public final class PackageUtils {
     /**
      * List all applications stored in App Manager database as well as from the system.
      *
-     * @param executor    Retrieve applications from the system using the given thread instead of the current thread.
-     * @param loadBackups Load/List backup metadata
+     * @param loadInBackground Retrieve applications from the system using the given thread instead of the current thread.
+     * @param loadBackups      Load/List backup metadata
      * @return List of applications, which could be the cached version if the executor parameter is {@code null}.
      */
     @WorkerThread
     @NonNull
     public static List<ApplicationItem> getInstalledOrBackedUpApplicationsFromDb(@NonNull Context context,
-                                                                                 @Nullable ExecutorService executor,
+                                                                                 boolean loadInBackground,
                                                                                  boolean loadBackups) {
-        List<ApplicationItem> applicationItems = new ArrayList<>();
-        List<App> apps = AppManager.getDb().appDao().getAll();
-        if (apps.size() == 0 || executor == null) {
-            // Load app list for the first time
-            Log.d(TAG, "Loading apps for the first time.");
-            updateInstalledOrBackedUpApplications(context, loadBackups);
-            apps = AppManager.getDb().appDao().getAll();
-        } else {
-            // Update list of apps safely in the background
-            executor.submit(() -> updateInstalledOrBackedUpApplications(context, loadBackups));
+        HashMap<String, ApplicationItem> applicationItems = new HashMap<>();
+        AppDb appDb = new AppDb();
+        List<App> apps = appDb.getAllApplications();
+        if (loadInBackground && apps.isEmpty()) {
+            // Force-load in foreground
+            loadInBackground = false;
         }
-        HashMap<String, Backup> backups = BackupUtils.getAllLatestBackupMetadataFromDb();
+        if (!loadInBackground) {
+            PowerManager.WakeLock wakeLock = CpuUtils.getPartialWakeLock("appDbUpdater");
+            try {
+                wakeLock.acquire();
+                // Load app list for the first time
+                Log.d(TAG, "Loading apps for the first time.");
+                appDb.loadInstalledOrBackedUpApplications(context);
+                apps = appDb.getAllApplications();
+            } finally {
+                CpuUtils.releaseWakeLock(wakeLock);
+            }
+        }
+        Map<String, Backup> backups = appDb.getBackups(false);
+        int thisUser = UserHandleHidden.myUserId();
         // Get application items from apps
         for (App app : apps) {
-            ApplicationItem item = new ApplicationItem();
-            item.packageName = app.packageName;
-            int i;
+            ApplicationItem item;
+            ApplicationItem oldItem = applicationItems.get(app.packageName);
             if (app.isInstalled) {
-                if ((i = applicationItems.indexOf(item)) != -1) {
-                    // Item already exists, add the user handle and continue
-                    ApplicationItem oldItem = applicationItems.get(i);
-                    oldItem.userHandles = ArrayUtils.appendInt(oldItem.userHandles, app.userId);
-                    oldItem.isInstalled = true;
-                    continue;
+                boolean newItem = oldItem == null || !oldItem.isInstalled;
+                if (oldItem != null) {
+                    // Item already exists
+                    item = oldItem;
                 } else {
-                    // Item doesn't exist, add the user handle
-                    item.userHandles = ArrayUtils.appendInt(item.userHandles, app.userId);
-                    item.isInstalled = true;
+                    // Item doesn't exist
+                    item = new ApplicationItem();
+                    applicationItems.put(app.packageName, item);
+                    item.packageName = app.packageName;
+                }
+                item.userIds = ArrayUtils.appendInt(item.userIds, app.userId);
+                item.isInstalled = true;
+                item.isOnlyDataInstalled = false;
+                item.openCount += app.openCount;
+                item.screenTime += app.screenTime;
+                if (item.lastUsageTime == 0L || item.lastUsageTime < app.lastUsageTime) {
+                    item.lastUsageTime = app.lastUsageTime;
+                }
+                item.hasKeystore |= app.hasKeystore;
+                item.usesSaf |= app.usesSaf;
+                if (app.ssaid != null) {
+                    item.ssaid = app.ssaid;
+                }
+                item.totalSize += app.codeSize + app.dataSize;
+                item.dataUsage += app.wifiDataUsage + app.mobileDataUsage;
+                if (!newItem && app.userId != thisUser) {
+                    // This user has the highest priority
+                    continue;
                 }
             } else {
                 // App not installed but may be installed in other profiles
-                if (applicationItems.contains(item)) {
+                if (oldItem != null) {
                     // Item exists, use the previous status
                     continue;
                 } else {
                     // Item doesn't exist, don't add user handle
+                    item = new ApplicationItem();
+                    item.packageName = app.packageName;
+                    applicationItems.put(app.packageName, item);
                     item.isInstalled = false;
+                    item.isOnlyDataInstalled = app.isOnlyDataInstalled;
+                    item.hasKeystore |= app.hasKeystore;
                 }
             }
-            if (backups.containsKey(item.packageName)) {
-                item.backup = backups.get(item.packageName);
-                backups.remove(item.packageName);
-            }
+            item.backup = backups.remove(item.packageName);
             item.flags = app.flags;
             item.uid = app.uid;
-            item.debuggable = (app.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
-            item.isUser = (app.flags & ApplicationInfo.FLAG_SYSTEM) == 0;
+            item.debuggable = app.isDebuggable();
+            item.isUser = !app.isSystemApp();
             item.isDisabled = !app.isEnabled;
             item.label = app.packageLabel;
-            item.sdk = app.sdk;
+            item.targetSdk = app.sdk;
             item.versionName = app.versionName;
             item.versionCode = app.versionCode;
             item.sharedUserId = app.sharedUserId;
@@ -222,7 +221,7 @@ public final class PackageUtils {
             item.blockedCount = app.rulesCount;
             item.trackerCount = app.trackerCount;
             item.lastActionTime = app.lastActionTime;
-            applicationItems.add(item);
+            item.generateOtherInfo();
         }
         // Add rest of the backups
         for (String packageName : backups.keySet()) {
@@ -230,6 +229,7 @@ public final class PackageUtils {
             if (backup == null) continue;
             ApplicationItem item = new ApplicationItem();
             item.packageName = backup.packageName;
+            applicationItems.put(backup.packageName, item);
             item.backup = backup;
             item.versionName = backup.versionName;
             item.versionCode = backup.versionCode;
@@ -239,167 +239,120 @@ public final class PackageUtils {
             item.isUser = !backup.isSystem;
             item.isDisabled = false;
             item.isInstalled = false;
+            item.isOnlyDataInstalled = false;
             item.hasSplits = backup.hasSplits;
-            applicationItems.add(item);
+            item.hasKeystore = backup.hasKeyStore;
+            item.generateOtherInfo();
         }
-        return applicationItems;
-    }
-
-    @WorkerThread
-    public static void updateInstalledOrBackedUpApplications(@NonNull Context context, boolean loadBackups) {
-        HashMap<String, Backup> backups;
-        if (loadBackups) {
-            try {
-                backups = BackupUtils.storeAllAndGetLatestBackupMetadata();
-            } catch (IOException e) {
-                e.printStackTrace();
-                // Backups variable should always be non-null
-                backups = new HashMap<>(0);
-            }
-        } else {
-            backups = BackupUtils.getAllLatestBackupMetadataFromDb();
-        }
-        // Interrupt thread on request
-        if (Thread.currentThread().isInterrupted()) return;
-
-        List<App> newApps = new ArrayList<>();
-        List<Integer> newAppHashes = new ArrayList<>();
-        int[] userHandles = Users.getUsersIds();
-        for (int userHandle : userHandles) {
-            // Interrupt thread on request
-            if (Thread.currentThread().isInterrupted()) return;
-
-            List<PackageInfo> packageInfoList;
-            try {
-                packageInfoList = PackageManagerCompat.getInstalledPackages(flagSigningInfo
-                        | PackageManager.GET_ACTIVITIES | PackageManager.GET_RECEIVERS | PackageManager.GET_PROVIDERS
-                        | PackageManager.GET_SERVICES | flagDisabledComponents | flagMatchUninstalled, userHandle);
-            } catch (Exception e) {
-                Log.e(TAG, "Could not retrieve package info list for user " + userHandle, e);
-                continue;
-            }
-            ApplicationInfo applicationInfo;
-            Backup backup;
-
-            for (PackageInfo packageInfo : packageInfoList) {
-                // Interrupt thread on request
-                if (Thread.currentThread().isInterrupted()) return;
-
-                applicationInfo = packageInfo.applicationInfo;
-                App app = App.fromPackageInfo(context, packageInfo);
-                backup = backups.get(applicationInfo.packageName);
-                if (backup != null) {
-                    backups.remove(applicationInfo.packageName);
+        if (loadInBackground) {
+            // Update list of apps safely in the background.
+            // We need to do this here to avoid locks in AppDb
+            ThreadUtils.postOnBackgroundThread(() -> {
+                PowerManager.WakeLock wakeLock = CpuUtils.getPartialWakeLock("appDbUpdater");
+                try {
+                    wakeLock.acquire();
+                    if (loadBackups) {
+                        appDb.loadInstalledOrBackedUpApplications(context);
+                    } else appDb.updateApplications(context);
+                } finally {
+                    CpuUtils.releaseWakeLock(wakeLock);
                 }
-                try (ComponentsBlocker cb = ComponentsBlocker.getInstance(app.packageName, app.userId, true)) {
-                    app.rulesCount = cb.entryCount();
-                }
-                newApps.add(app);
-                newAppHashes.add(app.getHashCode());
-            }
+            });
         }
-        // Add rest of the backup items, i.e., items that aren't installed
-        for (Backup backup : backups.values()) {
-            // Interrupt thread on request
-            if (Thread.currentThread().isInterrupted()) return;
-
-            if (backup == null) continue;
-            App app = App.fromBackup(backup);
-            try (ComponentsBlocker cb = ComponentsBlocker.getInstance(app.packageName, app.userId, true)) {
-                app.rulesCount = cb.entryCount();
-            }
-            newApps.add(app);
-            newAppHashes.add(app.getHashCode());
-        }
-        // Add new and delete old items
-        List<App> oldApps = AppManager.getDb().appDao().getAll();
-        List<App> updatedApps = new ArrayList<>();
-        ListIterator<App> iterator = oldApps.listIterator();
-        while (iterator.hasNext()) {
-            // Interrupt thread on request
-            if (Thread.currentThread().isInterrupted()) return;
-
-            App oldApp = iterator.next();
-            int index = newApps.indexOf(oldApp);
-            if (index != -1) {
-                // DB already has this app
-                if (!newAppHashes.contains(oldApp.getHashCode())) {
-                    // Change detected, replace old with new
-                    updatedApps.add(newApps.get(index));
-                } // else no change between two versions, the app don't have to be updated or deleted
-                iterator.remove();
-                newApps.remove(index);
-            } // else the app is new
-        }
-        AppManager.getDb().appDao().delete(oldApps);
-        AppManager.getDb().appDao().insert(newApps);
-        AppManager.getDb().appDao().insert(updatedApps);
-        if (oldApps.size() > 0) {
-            // Delete broadcast
-            Intent intent = new Intent(PackageChangeReceiver.ACTION_PACKAGE_REMOVED);
-            intent.setPackage(context.getPackageName());
-            intent.putExtra(Intent.EXTRA_CHANGED_PACKAGE_LIST, getPackageNamesFromApps(oldApps));
-            context.sendBroadcast(intent);
-        }
-        if (newApps.size() > 0) {
-            // New apps
-            Intent intent = new Intent(PackageChangeReceiver.ACTION_PACKAGE_ADDED);
-            intent.setPackage(context.getPackageName());
-            intent.putExtra(Intent.EXTRA_CHANGED_PACKAGE_LIST, getPackageNamesFromApps(newApps));
-            context.sendBroadcast(intent);
-        }
-        if (updatedApps.size() > 0) {
-            // Altered apps
-            Intent intent = new Intent(PackageChangeReceiver.ACTION_PACKAGE_ALTERED);
-            intent.setPackage(context.getPackageName());
-            intent.putExtra(Intent.EXTRA_CHANGED_PACKAGE_LIST, getPackageNamesFromApps(updatedApps));
-            context.sendBroadcast(intent);
-        }
+        return new ArrayList<>(applicationItems.values());
     }
 
     @NonNull
-    private static String[] getPackageNamesFromApps(@NonNull List<App> apps) {
-        HashSet<String> packages = new HashSet<>(apps.size());
-        for (App app : apps) {
-            packages.add(app.packageName);
+    public static List<PackageInfo> getAllPackages(int flags) {
+        return getAllPackages(flags, false);
+    }
+
+    @NonNull
+    public static List<PackageInfo> getAllPackages(int flags, boolean currentUserOnly) {
+        if (currentUserOnly) {
+            return PackageManagerCompat.getInstalledPackages(flags, UserHandleHidden.myUserId());
         }
-        return packages.toArray(new String[0]);
+        List<PackageInfo> packageInfoList = new ArrayList<>();
+        for (int userId : Users.getUsersIds()) {
+            if (!SelfPermissions.checkCrossUserPermission(userId, false)) {
+                // No support for cross user
+                continue;
+            }
+            packageInfoList.addAll(PackageManagerCompat.getInstalledPackages(flags, userId));
+            if (ThreadUtils.isInterrupted()) {
+                break;
+            }
+        }
+        return packageInfoList;
+    }
+
+
+    @NonNull
+    public static List<ApplicationInfo> getAllApplications(int flags) {
+        return getAllApplications(flags, false);
+    }
+
+    @NonNull
+    public static List<ApplicationInfo> getAllApplications(int flags, boolean currentUserOnly) {
+        if (currentUserOnly) {
+            return ExUtils.requireNonNullElse(() -> PackageManagerCompat.getInstalledApplications(flags,
+                    UserHandleHidden.myUserId()), Collections.emptyList());
+        }
+        List<ApplicationInfo> applicationInfoList = new ArrayList<>();
+        for (int userId : Users.getUsersIds()) {
+            try {
+                applicationInfoList.addAll(PackageManagerCompat.getInstalledApplications(flags, userId));
+                if (ThreadUtils.isInterrupted()) {
+                    break;
+                }
+            } catch (RemoteException ignore) {
+            }
+        }
+        return applicationInfoList;
     }
 
     @WorkerThread
+    @RequiresPermission("android.permission.PACKAGE_USAGE_STATS")
     @Nullable
-    public static PackageSizeInfo getPackageSizeInfo(Context context, String packageName, int userHandle, UUID storageUuid) {
+    public static PackageSizeInfo getPackageSizeInfo(@NonNull Context context, @NonNull String packageName,
+                                                     @UserIdInt int userHandle, @Nullable UUID storageUuid) {
         AtomicReference<PackageSizeInfo> packageSizeInfo = new AtomicReference<>();
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             CountDownLatch waitForStats = new CountDownLatch(1);
             try {
-                AppManager.getIPackageManager().getPackageSizeInfo(packageName, userHandle, new IPackageStatsObserver.Stub() {
-                    @SuppressWarnings("deprecation")
-                    @Override
-                    public void onGetStatsCompleted(final PackageStats pStats, boolean succeeded) {
-                        try {
-                            if (succeeded) packageSizeInfo.set(new PackageSizeInfo(pStats));
-                        } finally {
-                            waitForStats.countDown();
-                        }
-                    }
-                });
+                IPackageManager pm;
+                if (UserHandleHidden.myUserId() == userHandle) {
+                    // Since GET_PACKAGE_SIZE is a normal permission, there's no need to use a privileged service
+                    pm = PackageManagerCompat.getUnprivilegedPackageManager();
+                } else {
+                    // May return SecurityException in the ADB mode
+                    pm = PackageManagerCompat.getPackageManager();
+                }
+                pm.getPackageSizeInfo(packageName, userHandle,
+                        new IPackageStatsObserver.Stub() {
+                            @Override
+                            public void onGetStatsCompleted(final android.content.pm.PackageStats pStats, boolean succeeded) {
+                                try {
+                                    if (succeeded) packageSizeInfo.set(new PackageSizeInfo(pStats));
+                                } finally {
+                                    waitForStats.countDown();
+                                }
+                            }
+                        });
                 waitForStats.await(5, TimeUnit.SECONDS);
-            } catch (RemoteException | InterruptedException e) {
+            } catch (RemoteException | InterruptedException | SecurityException e) {
                 Log.e(TAG, e);
             }
         } else {
             try {
                 IStorageStatsManager storageStatsManager = IStorageStatsManager.Stub.asInterface(ProxyBinder
                         .getService(Context.STORAGE_STATS_SERVICE));
-                @SuppressWarnings("JavaReflectionMemberAccess")
-                Method getPackageSizeInfo = StorageManager.class.getMethod("convert", UUID.class);
-                String uuidString = (String) getPackageSizeInfo.invoke(null, storageUuid);
+                String uuidString = storageUuid != null ? StorageManagerHidden.convert(storageUuid) : null;
                 StorageStats storageStats = storageStatsManager.queryStatsForPackage(uuidString, packageName,
                         userHandle, context.getPackageName());
                 packageSizeInfo.set(new PackageSizeInfo(packageName, storageStats, userHandle));
-            } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException | RemoteException e) {
-                Log.e(TAG, e);
+            } catch (Throwable e) {
+                Log.w(TAG, e);
             }
         }
         return packageSizeInfo.get();
@@ -410,7 +363,8 @@ public final class PackageUtils {
         try {
             PackageInfo packageInfo = PackageManagerCompat.getPackageInfo(packageName,
                     PackageManager.GET_ACTIVITIES | PackageManager.GET_RECEIVERS | PackageManager.GET_PROVIDERS
-                            | flagDisabledComponents | flagMatchUninstalled | PackageManager.GET_SERVICES,
+                            | MATCH_DISABLED_COMPONENTS | MATCH_UNINSTALLED_PACKAGES | PackageManager.GET_SERVICES
+                            | PackageManagerCompat.MATCH_STATIC_SHARED_AND_SDK_LIBRARIES,
                     userHandle);
             return collectComponentClassNames(packageInfo);
         } catch (Throwable e) {
@@ -420,14 +374,13 @@ public final class PackageUtils {
     }
 
     @NonNull
-    public static HashMap<String, RuleType> collectComponentClassNames(@NonNull PackageInfo packageInfo) {
+    public static HashMap<String, RuleType> collectComponentClassNames(@Nullable PackageInfo packageInfo) {
         HashMap<String, RuleType> componentClasses = new HashMap<>();
+        if (packageInfo == null) return componentClasses;
         // Add activities
         if (packageInfo.activities != null) {
             for (ActivityInfo activityInfo : packageInfo.activities) {
-                if (activityInfo.targetActivity != null)
-                    componentClasses.put(activityInfo.targetActivity, RuleType.ACTIVITY);
-                else componentClasses.put(activityInfo.name, RuleType.ACTIVITY);
+                componentClasses.put(activityInfo.name, RuleType.ACTIVITY);
             }
         }
         // Add others
@@ -463,11 +416,11 @@ public final class PackageUtils {
     @NonNull
     public static Collection<Integer> getFilteredAppOps(String packageName, @UserIdInt int userHandle, @NonNull int[] appOps, int mode) {
         List<Integer> filteredAppOps = new ArrayList<>();
-        AppOpsService appOpsService = new AppOpsService();
+        AppOpsManagerCompat appOpsManager = new AppOpsManagerCompat();
         int uid = PackageUtils.getAppUid(new UserPackagePair(packageName, userHandle));
         for (int appOp : appOps) {
             try {
-                if (appOpsService.checkOperation(appOp, uid, packageName) != mode) {
+                if (appOpsManager.checkOperation(appOp, uid, packageName) != mode) {
                     filteredAppOps.add(appOp);
                 }
             } catch (Exception e) {
@@ -478,134 +431,58 @@ public final class PackageUtils {
     }
 
     @NonNull
-    public static HashMap<String, RuleType> getUserDisabledComponentsForPackage(String packageName, @UserIdInt int userHandle) {
-        HashMap<String, RuleType> componentClasses = collectComponentClassNames(packageName, userHandle);
+    public static HashMap<String, RuleType> getUserDisabledComponentsForPackage(String packageName, @UserIdInt int userId) {
+        HashMap<String, RuleType> componentClasses = collectComponentClassNames(packageName, userId);
         HashMap<String, RuleType> disabledComponents = new HashMap<>();
-        PackageManager pm = AppManager.getContext().getPackageManager();
         for (String componentName : componentClasses.keySet()) {
-            if (isComponentDisabledByUser(pm, packageName, componentName))
-                disabledComponents.put(componentName, componentClasses.get(componentName));
+            try {
+                if (isComponentDisabledByUser(packageName, componentName, userId)) {
+                    disabledComponents.put(componentName, componentClasses.get(componentName));
+                }
+            } catch (NameNotFoundException ignore) {
+                // Component unavailable
+            }
         }
         disabledComponents.putAll(ComponentUtils.getIFWRulesForPackage(packageName));
         return disabledComponents;
     }
 
-    public static boolean isComponentDisabledByUser(@NonNull PackageManager pm, @NonNull String packageName, @NonNull String componentClassName) {
-        ComponentName componentName = new ComponentName(packageName, componentClassName);
-        switch (pm.getComponentEnabledSetting(componentName)) {
-            case PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER:
-                return true;
-            case PackageManager.COMPONENT_ENABLED_STATE_DISABLED:
-            case PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED:
-            case PackageManager.COMPONENT_ENABLED_STATE_ENABLED:
-            case PackageManager.COMPONENT_ENABLED_STATE_DEFAULT:
-            default:
-                return false;
+    @SuppressLint("SwitchIntDef")
+    public static boolean isComponentDisabledByUser(@NonNull String packageName, @NonNull String componentClassName,
+                                                    @UserIdInt int userId)
+            throws SecurityException, NameNotFoundException {
+        try {
+            ComponentName componentName = new ComponentName(packageName, componentClassName);
+            switch (PackageManagerCompat.getComponentEnabledSetting(componentName, userId)) {
+                case PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER:
+                    return true;
+                case PackageManager.COMPONENT_ENABLED_STATE_DISABLED:
+                case PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED:
+                case PackageManager.COMPONENT_ENABLED_STATE_ENABLED:
+                case PackageManager.COMPONENT_ENABLED_STATE_DEFAULT:
+                default:
+                    return false;
+            }
+        } catch (IllegalArgumentException e) {
+            throw (NameNotFoundException) new NameNotFoundException(e.getMessage()).initCause(e);
         }
     }
 
     @Nullable
-    public static String[] getPermissionsForPackage(String packageName, @UserIdInt int userHandle)
-            throws PackageManager.NameNotFoundException, RemoteException {
-        PackageInfo info = PackageManagerCompat.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS, userHandle);
+    public static String[] getPermissionsForPackage(String packageName, @UserIdInt int userId)
+            throws NameNotFoundException, RemoteException {
+        PackageInfo info = PackageManagerCompat.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS
+                | PackageManagerCompat.MATCH_STATIC_SHARED_AND_SDK_LIBRARIES, userId);
         return info.requestedPermissions;
-    }
-
-    @NonNull
-    public static List<ComponentName> getRunningServicesForPackage(String packageName, @UserIdInt int userHandle) {
-        List<ComponentName> runningServices = new ArrayList<>();
-        if (!PermissionUtils.hasDumpPermission()) return runningServices;
-        Runner.Result result = Runner.runCommand(new String[]{"dumpsys", "activity", "services", "-p", packageName});
-        if (result.isSuccessful()) {
-            List<String> serviceDump = result.getOutputAsList(1);
-            Matcher matcher;
-            ComponentName service;
-            String line;
-            ListIterator<String> it = serviceDump.listIterator();
-            if (it.hasNext()) {
-                matcher = SERVICE_REGEX.matcher(it.next());
-                while (it.hasNext()) {
-                    if (matcher.find(0)) {
-                        String userId = matcher.group(1);
-                        String serviceName = matcher.group(2);
-                        if (userId == null || serviceName == null || Integer.decode(userId) != userHandle) {
-                            matcher = SERVICE_REGEX.matcher(it.next());
-                            continue;
-                        }
-                        service = ComponentName.unflattenFromString(serviceName);
-                        line = it.next();
-                        matcher = SERVICE_REGEX.matcher(line);
-                        while (it.hasNext()) {
-                            if (matcher.find(0)) break;
-                            if (line.contains("app=ProcessRecord{")) {
-                                runningServices.add(service);
-                                break;
-                            }
-                            line = it.next();
-                            matcher = SERVICE_REGEX.matcher(line);
-                        }
-                    } else matcher = SERVICE_REGEX.matcher(it.next());
-                }
-            }
-        }
-        return runningServices;
-    }
-
-    public static boolean hasRunningServices(String packageName) {
-        if (!PermissionUtils.hasDumpPermission()) return false;
-        Runner.Result result = Runner.runCommand(Runner.getUserInstance(), new String[]{"dumpsys", "activity", "services", "-p", packageName});
-        if (result.isSuccessful()) {
-            List<String> serviceDump = result.getOutputAsList(1);
-            if (serviceDump.size() == 1 && SERVICE_NOTHING.equals(serviceDump.get(0).trim())) {
-                return false;
-            }
-            Matcher matcher;
-            String service, line;
-            ListIterator<String> it = serviceDump.listIterator();
-            if (it.hasNext()) {
-                line = it.next();
-                if ("Last ANR service:".equals(line.trim())) return false;
-                matcher = SERVICE_REGEX.matcher(line);
-                while (it.hasNext()) {
-                    if (matcher.find(0)) {
-                        service = matcher.group(1);
-                        line = it.next();
-                        if ("Last ANR service:".equals(line.trim())) break;
-                        matcher = SERVICE_REGEX.matcher(line);
-                        while (it.hasNext()) {
-                            if (matcher.find(0)) break;
-                            if (line.contains("app=ProcessRecord{")) {
-                                if (service != null) return true;
-                            }
-                            line = it.next();
-                            matcher = SERVICE_REGEX.matcher(line);
-                        }
-                    } else matcher = SERVICE_REGEX.matcher(it.next());
-                }
-            }
-        }
-        return false;
-    }
-
-    public static int getPidForPackage(String packageName, int uid) {
-        try {
-            @SuppressWarnings("unchecked")
-            List<ProcessEntry> processItems = (List<ProcessEntry>) IPCUtils.getAmService().getRunningProcesses();
-            for (ProcessEntry entry : processItems) {
-                if (entry.name.equals(packageName) && entry.users.fsUid == uid) return entry.pid;
-            }
-        } catch (Throwable ignore) {
-        }
-        return 0;
     }
 
     @NonNull
     public static String getPackageLabel(@NonNull PackageManager pm, String packageName) {
         try {
             @SuppressLint("WrongConstant")
-            ApplicationInfo applicationInfo = pm.getApplicationInfo(packageName, flagMatchUninstalled);
+            ApplicationInfo applicationInfo = pm.getApplicationInfo(packageName, MATCH_UNINSTALLED_PACKAGES);
             return pm.getApplicationLabel(applicationInfo).toString();
-        } catch (PackageManager.NameNotFoundException ignore) {
+        } catch (NameNotFoundException ignore) {
         }
         return packageName;
     }
@@ -613,7 +490,8 @@ public final class PackageUtils {
     @NonNull
     public static CharSequence getPackageLabel(@NonNull PackageManager pm, String packageName, int userHandle) {
         try {
-            ApplicationInfo applicationInfo = PackageManagerCompat.getApplicationInfo(packageName, 0, userHandle);
+            ApplicationInfo applicationInfo = PackageManagerCompat.getApplicationInfo(packageName,
+                    PackageManagerCompat.MATCH_STATIC_SHARED_AND_SDK_LIBRARIES, userHandle);
             return applicationInfo.loadLabel(pm);
         } catch (Exception ignore) {
         }
@@ -621,9 +499,9 @@ public final class PackageUtils {
     }
 
     @Nullable
-    public static ArrayList<String> packagesToAppLabels(@NonNull PackageManager pm, @Nullable List<String> packages, List<Integer> userHandles) {
+    public static ArrayList<CharSequence> packagesToAppLabels(@NonNull PackageManager pm, @Nullable List<String> packages, List<Integer> userHandles) {
         if (packages == null) return null;
-        ArrayList<String> appLabels = new ArrayList<>();
+        ArrayList<CharSequence> appLabels = new ArrayList<>();
         int i = 0;
         for (String packageName : packages) {
             appLabels.add(PackageUtils.getPackageLabel(pm, packageName, userHandles.get(i)).toString());
@@ -632,31 +510,9 @@ public final class PackageUtils {
         return appLabels;
     }
 
-    public static boolean isInstalled(@NonNull PackageManager packageManager, String packageName) {
-        ApplicationInfo applicationInfo = null;
-        try {
-            applicationInfo = packageManager.getApplicationInfo(packageName, 0);
-        } catch (PackageManager.NameNotFoundException ignore) {
-        }
-        return applicationInfo != null;
-    }
-
-    public static int getAppUid(@NonNull PackageManager packageManager, String packageName) {
-        ApplicationInfo applicationInfo;
-        try {
-            applicationInfo = packageManager.getApplicationInfo(packageName, 0);
-            return applicationInfo.uid;
-        } catch (PackageManager.NameNotFoundException ignore) {
-        }
-        return 0;
-    }
-
     public static int getAppUid(@NonNull UserPackagePair pair) {
-        try {
-            return PackageManagerCompat.getApplicationInfo(pair.getPackageName(), 0, pair.getUserHandle()).uid;
-        } catch (Exception ignore) {
-        }
-        return -1;
+        return ExUtils.requireNonNullElse(() -> PackageManagerCompat.getApplicationInfo(pair.getPackageName(),
+                PackageManagerCompat.MATCH_STATIC_SHARED_AND_SDK_LIBRARIES, pair.getUserId()).uid, -1);
     }
 
     @NonNull
@@ -668,90 +524,27 @@ public final class PackageUtils {
         return sourceDir;
     }
 
-    @NonNull
-    public static String[] getDataDirs(@NonNull ApplicationInfo applicationInfo, boolean loadInternal,
-                                       boolean loadExternal, boolean loadMediaObb) {
-        ArrayList<String> dataDirs = new ArrayList<>();
-        if (applicationInfo.dataDir == null) {
-            throw new RuntimeException("Data directory cannot be empty.");
-        }
-        if (loadInternal) {
-            dataDirs.add(applicationInfo.dataDir);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N &&
-                    !applicationInfo.dataDir.equals(applicationInfo.deviceProtectedDataDir)) {
-                dataDirs.add(applicationInfo.deviceProtectedDataDir);
-            }
-        }
-        int userHandle = Users.getUserId(applicationInfo.uid);
-        OsEnvironment.UserEnvironment ue = OsEnvironment.getUserEnvironment(userHandle);
-        if (loadExternal) {
-            ProxyFile[] externalFiles = ue.buildExternalStorageAppDataDirs(applicationInfo.packageName);
-            for (ProxyFile externalFile : externalFiles) {
-                if (externalFile != null && externalFile.exists())
-                    dataDirs.add(externalFile.getAbsolutePath());
-            }
-        }
-        if (loadMediaObb) {
-            List<ProxyFile> externalFiles = new ArrayList<>();
-            externalFiles.addAll(Arrays.asList(ue.buildExternalStorageAppMediaDirs(applicationInfo.packageName)));
-            externalFiles.addAll(Arrays.asList(ue.buildExternalStorageAppObbDirs(applicationInfo.packageName)));
-            for (ProxyFile externalFile : externalFiles) {
-                if (externalFile != null && externalFile.exists())
-                    dataDirs.add(externalFile.getAbsolutePath());
-            }
-        }
-        return dataDirs.toArray(new String[0]);
-    }
-
-    public static String getHiddenCodePathOrDefault(String packageName, String defaultPath) {
+    @Nullable
+    @Contract("_,!null -> !null")
+    public static String getHiddenCodePathOrDefault(@NonNull String packageName, @Nullable String defaultPath) {
         Runner.Result result = Runner.runCommand(RunnerUtils.CMD_PM + " dump " + packageName + " | grep codePath");
         if (result.isSuccessful()) {
             List<String> paths = result.getOutputAsList();
-            if (paths.size() > 0) {
+            if (!paths.isEmpty()) {
                 // Get only the last path
                 String codePath = paths.get(paths.size() - 1);
                 int start = codePath.indexOf('=');
                 if (start != -1) return codePath.substring(start + 1);
             }
         }
-        return new File(defaultPath).getParent();
-    }
-
-    @NonNull
-    public static List<Integer> getAppOpModes() {
-        List<Integer> appOpModes = new ArrayList<>();
-        appOpModes.add(AppOpsManager.MODE_ALLOWED);
-        appOpModes.add(AppOpsManager.MODE_IGNORED);
-        appOpModes.add(AppOpsManager.MODE_ERRORED);
-        appOpModes.add(AppOpsManager.MODE_DEFAULT);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            appOpModes.add(AppOpsManager.MODE_FOREGROUND);
-        }
-        if (MiuiUtils.isMiui()) {
-            appOpModes.add(AppOpsManager.MODE_ASK);
-        }
-        return appOpModes;
-    }
-
-    @NonNull
-    public static List<Integer> getAppOps() {
-        List<Integer> appOps = new ArrayList<>();
-        for (int i = 0; i < AppOpsManager._NUM_OP; ++i) {
-            appOps.add(i);
-        }
-        if (MiuiUtils.isMiui()) {
-            for (int op = AppOpsManager.MIUI_OP_START + 1; op < AppOpsManager.MIUI_OP_END; ++op) {
-                appOps.add(op);
-            }
-        }
-        return appOps;
+        return defaultPath != null ? new File(defaultPath).getParent() : null;
     }
 
     @NonNull
     public static CharSequence[] getAppOpModeNames(@NonNull List<Integer> appOpModes) {
         CharSequence[] appOpModeNames = new CharSequence[appOpModes.size()];
         for (int i = 0; i < appOpModes.size(); ++i) {
-            appOpModeNames[i] = AppOpsManager.modeToName(appOpModes.get(i));
+            appOpModeNames[i] = AppOpsManagerCompat.modeToName(appOpModes.get(i));
         }
         return appOpModeNames;
     }
@@ -760,14 +553,27 @@ public final class PackageUtils {
     public static CharSequence[] getAppOpNames(@NonNull List<Integer> appOps) {
         CharSequence[] appOpNames = new CharSequence[appOps.size()];
         for (int i = 0; i < appOps.size(); ++i) {
-            appOpNames[i] = AppOpsManager.opToName(appOps.get(i));
+            appOpNames[i] = AppOpsManagerCompat.opToName(appOps.get(i));
         }
         return appOpNames;
     }
 
-    @SuppressWarnings("deprecation")
+    /**
+     * Whether the app may be using Play App Signing i.e. letting Google manage the app's signing keys.
+     *
+     * @param applicationInfo {@link PackageManager#GET_META_DATA} must be used while fetching application info.
+     * @see <a href="https://support.google.com/googleplay/android-developer/answer/9842756#zippy=%2Capp-signing-process">Use Play App Signing</a>
+     */
+    public static boolean usesPlayAppSigning(@NonNull ApplicationInfo applicationInfo) {
+        return applicationInfo.metaData != null
+                && "STAMP_TYPE_DISTRIBUTION_APK".equals(applicationInfo.metaData
+                .getString("com.android.stamp.type"))
+                && "https://play.google.com/store".equals(applicationInfo.metaData
+                .getString("com.android.stamp.source"));
+    }
+
     @Nullable
-    public static Signature[] getSigningInfo(@NonNull PackageInfo packageInfo, boolean isExternal) {
+    public static SignerInfo getSignerInfo(@NonNull PackageInfo packageInfo, boolean isExternal) {
         if (!isExternal || Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 SigningInfo signingInfo = packageInfo.signingInfo;
@@ -775,45 +581,34 @@ public final class PackageUtils {
                     if (!isExternal) {
                         return null;
                     } // else Could be a false-negative
-                } else return signingInfo.hasMultipleSigners() ? signingInfo.getApkContentsSigners()
-                        : signingInfo.getSigningCertificateHistory();
+                } else {
+                    return new SignerInfo(signingInfo);
+                }
             }
         }
         // Is an external app
-        if (packageInfo.signatures == null) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P || packageInfo.signatures == null) {
             // Could be a false-negative, try with apksig library
             String apkPath = packageInfo.applicationInfo.publicSourceDir;
             if (apkPath != null) {
-                Log.w(TAG, "getSigningInfo: Using fallback method");
-                return packageInfo.signatures = getSigningInfo(new File(apkPath));
+                Log.w(TAG, "getSignerInfo: Using fallback method");
+                return getSignerInfo(new File(apkPath));
             }
         }
-        return packageInfo.signatures;
+        return new SignerInfo(packageInfo.signatures);
     }
 
     @Nullable
-    public static Signature[] getSigningInfo(@NonNull File apkFile) {
-        ApkVerifier.Builder builder = new ApkVerifier.Builder(apkFile);
-        ApkVerifier apkVerifier = builder.build();
-        ApkVerifier.Result apkVerifierResult;
+    private static SignerInfo getSignerInfo(@NonNull File apkFile) {
+        ApkVerifier apkVerifier = new ApkVerifier.Builder(apkFile)
+                .setMaxCheckedPlatformVersion(Build.VERSION.SDK_INT)
+                .build();
         try {
-            apkVerifierResult = apkVerifier.verify();
+            return new SignerInfo(apkVerifier.verify());
         } catch (IOException | ApkFormatException | NoSuchAlgorithmException e) {
-            Log.e(TAG, e);
+            e.printStackTrace();
             return null;
         }
-        // Get signer certificates
-        List<X509Certificate> certificates = apkVerifierResult.getSignerCertificates();
-        if (certificates == null || certificates.size() == 0) return null;
-        List<Signature> signatures = new ArrayList<>(certificates.size());
-        for (X509Certificate certificate : certificates) {
-            try {
-                signatures.add(new Signature(certificate.getEncoded()));
-            } catch (CertificateEncodingException e) {
-                return signatures.toArray(new Signature[0]);
-            }
-        }
-        return signatures.toArray(new Signature[0]);
     }
 
     @NonNull
@@ -822,15 +617,55 @@ public final class PackageUtils {
     }
 
     public static boolean isSignatureDifferent(@NonNull PackageInfo newPkgInfo, @NonNull PackageInfo oldPkgInfo) {
-        String[] newChecksums = getSigningCertSha256Checksum(newPkgInfo, true);
-        List<String> oldChecksums = new ArrayList<>(Arrays.asList(getSigningCertSha256Checksum(oldPkgInfo)));
-        // Signature is different if the number of signatures don't match
-        if (newChecksums.length != oldChecksums.size()) return true;
-        for (String newChecksum : newChecksums) {
-            oldChecksums.remove(newChecksum);
+        SignerInfo newSignerInfo = getSignerInfo(newPkgInfo, true);
+        SignerInfo oldSignerInfo = getSignerInfo(oldPkgInfo, false);
+        if (newSignerInfo == null && oldSignerInfo == null) {
+            // No signers
+            return false;
         }
-        // Old checksums should contain no values if the checksums are the same
-        return oldChecksums.size() != 0;
+        if (newSignerInfo == null || oldSignerInfo == null) {
+            // One of them is signed, other doesn't
+            return true;
+        }
+        String[] newChecksums;
+        List<String> oldChecksums;
+        newChecksums = getSigningCertChecksums(DigestUtils.SHA_256, newSignerInfo);
+        oldChecksums = Arrays.asList(getSigningCertChecksums(DigestUtils.SHA_256, oldSignerInfo));
+        if (newSignerInfo.hasMultipleSigners()) {
+            // For multiple signers, all signatures must match.
+            if (newChecksums.length != oldChecksums.size()) {
+                // Signature is different if the number of signatures don't match
+                return true;
+            }
+            for (String newChecksum : newChecksums) {
+                oldChecksums.remove(newChecksum);
+            }
+            // Old checksums should contain no values if the checksums are the same
+            return !oldChecksums.isEmpty();
+        }
+        // For single signer, there could be one or more extra certificates for rotation.
+        if (newChecksums.length == 0 && oldChecksums.isEmpty()) {
+            // No signers
+            return false;
+        }
+        if (newChecksums.length == 0 || oldChecksums.isEmpty()) {
+            // One of them is signed, other doesn't
+            return true;
+        }
+        // Check if the user is downgrading or reinstalling
+        long oldVersionCode = PackageInfoCompat.getLongVersionCode(oldPkgInfo);
+        long newVersionCode = PackageInfoCompat.getLongVersionCode(newPkgInfo);
+        if (oldVersionCode >= newVersionCode) {
+            // Downgrading to an older version or reinstalling. Match only the first signature
+            return !newChecksums[0].equals(oldChecksums.get(0));
+        }
+        // Updating or reinstalling. Match only one signature
+        for (String newChecksum : newChecksums) {
+            if (oldChecksums.contains(newChecksum)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @NonNull
@@ -841,14 +676,26 @@ public final class PackageUtils {
     @NonNull
     public static String[] getSigningCertChecksums(@DigestUtils.Algorithm String algo,
                                                    PackageInfo packageInfo, boolean isExternal) {
-        Signature[] signatureArray = getSigningInfo(packageInfo, isExternal);
-        ArrayList<String> checksums = new ArrayList<>();
+        SignerInfo signerInfo = getSignerInfo(packageInfo, isExternal);
+        return getSigningCertChecksums(algo, signerInfo);
+    }
+
+    @NonNull
+    public static String[] getSigningCertChecksums(@DigestUtils.Algorithm String algo,
+                                                   @Nullable SignerInfo signerInfo) {
+        X509Certificate[] signatureArray = signerInfo == null ? null : signerInfo.getAllSignerCerts();
         if (signatureArray != null) {
-            for (Signature signature : signatureArray) {
-                checksums.add(DigestUtils.getHexDigest(algo, signature.toByteArray()));
+            ArrayList<String> checksums = new ArrayList<>();
+            for (X509Certificate signature : signatureArray) {
+                try {
+                    checksums.add(DigestUtils.getHexDigest(algo, signature.getEncoded()));
+                } catch (CertificateEncodingException e) {
+                    e.printStackTrace();
+                }
             }
+            return checksums.toArray(new String[0]);
         }
-        return checksums.toArray(new String[0]);
+        return EmptyArray.STRING;
     }
 
     @NonNull
@@ -856,46 +703,51 @@ public final class PackageUtils {
             throws CertificateEncodingException {
         SpannableStringBuilder builder = new SpannableStringBuilder();
         if (certificate == null) return builder;
+        final String separator = LangUtils.getSeparatorString();
         byte[] certBytes = certificate.getEncoded();
-        builder.append(getPrimaryText(ctx, ctx.getString(R.string.subject) + ": "))
-                .append(certificate.getSubjectX500Principal().getName()).append("\n")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.issuer) + ": "))
-                .append(certificate.getIssuerX500Principal().getName()).append("\n")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.issued_date) + ": "))
-                .append(certificate.getNotBefore().toString()).append("\n")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.expiry_date) + ": "))
-                .append(certificate.getNotAfter().toString()).append("\n")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.type) + ": "))
-                .append(certificate.getType()).append(", ")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.version) + ": "))
-                .append(String.valueOf(certificate.getVersion())).append(", ")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.validity) + ": "));
+        builder.append(getStyledKeyValue(ctx, R.string.subject, certificate.getSubjectX500Principal().getName(), separator))
+                .append("\n")
+                .append(getStyledKeyValue(ctx, R.string.issuer, certificate.getIssuerX500Principal().getName(), separator))
+                .append("\n")
+                .append(getStyledKeyValue(ctx, R.string.issued_date, certificate.getNotBefore().toString(), separator))
+                .append("\n")
+                .append(getStyledKeyValue(ctx, R.string.expiry_date, certificate.getNotAfter().toString(), separator))
+                .append("\n")
+                .append(getStyledKeyValue(ctx, R.string.type, certificate.getType(), separator))
+                .append(", ")
+                .append(getStyledKeyValue(ctx, R.string.version, String.valueOf(certificate.getVersion()), separator))
+                .append(", ");
+        int validity;
         try {
             certificate.checkValidity();
-            builder.append(ctx.getString(R.string.valid));
+            validity = R.string.valid;
         } catch (CertificateExpiredException e) {
-            builder.append(ctx.getString(R.string.expired));
+            validity = R.string.expired;
         } catch (CertificateNotYetValidException e) {
-            builder.append(ctx.getString(R.string.not_yet_valid));
+            validity = R.string.not_yet_valid;
         }
-        builder.append("\n")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.serial_no) + ": "))
-                .append(Utils.bytesToHex(certificate.getSerialNumber().toByteArray())).append("\n");
+        builder.append(getStyledKeyValue(ctx, R.string.validity, ctx.getText(validity), separator))
+                .append("\n")
+                .append(getPrimaryText(ctx, ctx.getString(R.string.serial_no) + separator))
+                .append(getMonospacedText(HexEncoding.encodeToString(certificate.getSerialNumber().toByteArray(), false)))
+                .append("\n");
         // Checksums
         builder.append(getTitleText(ctx, ctx.getString(R.string.checksums))).append("\n");
         Pair<String, String>[] digests = DigestUtils.getDigests(certBytes);
         for (Pair<String, String> digest : digests) {
-            builder.append(getPrimaryText(ctx, digest.first + ": ")).append(digest.second).append("\n");
+            builder.append(getPrimaryText(ctx, digest.first + separator))
+                    .append(getMonospacedText(digest.second))
+                    .append("\n");
         }
         // Signature
         builder.append(getTitleText(ctx, ctx.getString(R.string.app_signing_signature)))
                 .append("\n")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.algorithm) + ": "))
-                .append(certificate.getSigAlgName()).append("\n")
-                .append(getPrimaryText(ctx, "OID: "))
-                .append(certificate.getSigAlgOID()).append("\n")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.app_signing_signature) + ": "))
-                .append(Utils.bytesToHex(certificate.getSignature())).append("\n");
+                .append(getStyledKeyValue(ctx, R.string.algorithm, certificate.getSigAlgName(), separator))
+                .append("\n")
+                .append(getStyledKeyValue(ctx, "OID", certificate.getSigAlgOID(), separator))
+                .append("\n")
+                .append(getPrimaryText(ctx, ctx.getString(R.string.app_signing_signature) + separator))
+                .append(getMonospacedText(HexEncoding.encodeToString(certificate.getSignature(), false))).append("\n");
         // Public key used by Google: https://github.com/google/conscrypt
         // 1. X509PublicKey (PublicKey)
         // 2. OpenSSLRSAPublicKey (RSAPublicKey)
@@ -903,42 +755,42 @@ public final class PackageUtils {
         PublicKey publicKey = certificate.getPublicKey();
         builder.append(getTitleText(ctx, ctx.getString(R.string.public_key)))
                 .append("\n")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.algorithm) + ": "))
-                .append(publicKey.getAlgorithm()).append("\n")
-                .append(getPrimaryText(ctx, ctx.getString(R.string.format) + ": "))
-                .append(publicKey.getFormat());
+                .append(getStyledKeyValue(ctx, R.string.algorithm, publicKey.getAlgorithm(), separator))
+                .append("\n")
+                .append(getStyledKeyValue(ctx, R.string.format, publicKey.getFormat(), separator));
         if (publicKey instanceof RSAPublicKey) {
             RSAPublicKey rsaPublicKey = (RSAPublicKey) publicKey;
             builder.append("\n")
-                    .append(getPrimaryText(ctx, ctx.getString(R.string.rsa_exponent) + ": "))
-                    .append(rsaPublicKey.getPublicExponent().toString()).append("\n")
-                    .append(getPrimaryText(ctx, ctx.getString(R.string.rsa_modulus) + ": "))
-                    .append(Utils.bytesToHex(rsaPublicKey.getModulus().toByteArray()));
+                    .append(getStyledKeyValue(ctx, R.string.rsa_exponent, rsaPublicKey.getPublicExponent().toString(), separator))
+                    .append("\n")
+                    .append(getPrimaryText(ctx, ctx.getString(R.string.rsa_modulus) + separator))
+                    .append(getMonospacedText(HexEncoding.encodeToString(rsaPublicKey.getModulus().toByteArray(), false)));
         } else if (publicKey instanceof ECPublicKey) {
             ECPublicKey ecPublicKey = (ECPublicKey) publicKey;
             builder.append("\n")
-                    .append(getPrimaryText(ctx, ctx.getString(R.string.dsa_affine_x) + ": "))
-                    .append(ecPublicKey.getW().getAffineX().toString()).append("\n")
-                    .append(getPrimaryText(ctx, ctx.getString(R.string.dsa_affine_y) + ": "))
-                    .append(ecPublicKey.getW().getAffineY().toString());
+                    .append(getStyledKeyValue(ctx, R.string.dsa_affine_x, ecPublicKey.getW().getAffineX().toString(), separator))
+                    .append("\n")
+                    .append(getStyledKeyValue(ctx, R.string.dsa_affine_y, ecPublicKey.getW().getAffineY().toString(), separator));
         }
         // TODO(5/10/20): Add description for each extensions
         Set<String> critSet = certificate.getCriticalExtensionOIDs();
         if (critSet != null && !critSet.isEmpty()) {
             builder.append("\n").append(getTitleText(ctx, ctx.getString(R.string.critical_exts)));
             for (String oid : critSet) {
+                String oidName = OidMap.getName(oid);
                 builder.append("\n- ")
-                        .append(getPrimaryText(ctx, oid + ": "))
-                        .append(Utils.bytesToHex(certificate.getExtensionValue(oid)));
+                        .append(getPrimaryText(ctx, (oidName != null ? oidName : oid) + separator))
+                        .append(getMonospacedText(HexEncoding.encodeToString(certificate.getExtensionValue(oid), false)));
             }
         }
         Set<String> nonCritSet = certificate.getNonCriticalExtensionOIDs();
         if (nonCritSet != null && !nonCritSet.isEmpty()) {
             builder.append("\n").append(getTitleText(ctx, ctx.getString(R.string.non_critical_exts)));
             for (String oid : nonCritSet) {
+                String oidName = OidMap.getName(oid);
                 builder.append("\n- ")
-                        .append(getPrimaryText(ctx, oid + ": "))
-                        .append(Utils.bytesToHex(certificate.getExtensionValue(oid)));
+                        .append(getPrimaryText(ctx, (oidName != null ? oidName : oid) + separator))
+                        .append(getMonospacedText(HexEncoding.encodeToString(certificate.getExtensionValue(oid), false)));
             }
         }
         return builder;
@@ -948,46 +800,118 @@ public final class PackageUtils {
     public static Spannable getApkVerifierInfo(@Nullable ApkVerifier.Result result, Context ctx) {
         SpannableStringBuilder builder = new SpannableStringBuilder();
         if (result == null) return builder;
-        int colorRed = ContextCompat.getColor(ctx, R.color.red);
-        int colorGreen = ContextCompat.getColor(ctx, R.color.stopped);
+        int colorFailure = ColorCodes.getFailureColor(ctx);
+        int colorSuccess = ColorCodes.getSuccessColor(ctx);
         int warnCount = 0;
         List<CharSequence> errors = new ArrayList<>();
         for (ApkVerifier.IssueWithParams err : result.getErrors()) {
-            errors.add(getColoredText(err.toString(), colorRed));
+            errors.add(getColoredText(err.toString(), colorFailure));
         }
         warnCount += result.getWarnings().size();
         for (ApkVerifier.Result.V1SchemeSignerInfo signer : result.getV1SchemeIgnoredSigners()) {
             String name = signer.getName();
             for (ApkVerifier.IssueWithParams err : signer.getErrors()) {
-                errors.add(getColoredText(new SpannableStringBuilder(getBoldString(name + ": ")).append(err.toString()), colorRed));
+                errors.add(getColoredText(new SpannableStringBuilder(getBoldString(name + LangUtils.getSeparatorString())).append(err.toString()), colorFailure));
             }
             warnCount += signer.getWarnings().size();
         }
         if (result.isVerified()) {
             if (warnCount == 0) {
-                builder.append(getColoredText(getTitleText(ctx, "\u2714 " +
-                        ctx.getString(R.string.verified)), colorGreen));
+                builder.append(getColoredText(getTitleText(ctx, "✔ " +
+                        ctx.getString(R.string.verified)), colorSuccess));
             } else {
-                builder.append(getColoredText(getTitleText(ctx, "\u2714 " + ctx.getResources()
-                        .getQuantityString(R.plurals.verified_with_warning, warnCount, warnCount)), colorGreen));
+                builder.append(getColoredText(getTitleText(ctx, "✔ " + ctx.getResources()
+                        .getQuantityString(R.plurals.verified_with_warning, warnCount, warnCount)), colorSuccess));
             }
             if (result.isSourceStampVerified()) {
-                builder.append("\n\u2714 ").append(ctx.getString(R.string.source_stamp_verified));
+                String source = Signer.getSourceStampSource(result.getSourceStampInfo());
+                if (source != null) {
+                    builder.append("\n✔ ").append(ctx.getString(R.string.source_stamp_verified_and_identified_to_be_from_source, source));
+                } else builder.append("\n✔ ").append(ctx.getString(R.string.source_stamp_verified));
             }
             List<CharSequence> sigSchemes = new LinkedList<>();
             if (result.isVerifiedUsingV1Scheme()) sigSchemes.add("v1");
             if (result.isVerifiedUsingV2Scheme()) sigSchemes.add("v2");
             if (result.isVerifiedUsingV3Scheme()) sigSchemes.add("v3");
+            if (result.isVerifiedUsingV31Scheme()) sigSchemes.add("v3.1");
             if (result.isVerifiedUsingV4Scheme()) sigSchemes.add("v4");
             builder.append("\n").append(getPrimaryText(ctx, ctx.getResources()
-                    .getQuantityString(R.plurals.app_signing_signature_schemes_pl, sigSchemes.size()) + ": "));
-            builder.append(TextUtils.joinSpannable(", ", sigSchemes));
+                    .getQuantityString(R.plurals.app_signing_signature_schemes_pl, sigSchemes.size()) + LangUtils.getSeparatorString()));
+            builder.append(TextUtilsCompat.joinSpannable(", ", sigSchemes));
         } else {
-            builder.append(getColoredText(getTitleText(ctx, "\u2718 " + ctx.getString(R.string.not_verified)), colorRed));
+            builder.append(getColoredText(getTitleText(ctx, "✘ " + ctx.getString(R.string.not_verified)), colorFailure));
         }
         builder.append("\n");
         // If there are errors, no certificate info will be loaded
-        builder.append(TextUtils.joinSpannable("\n", errors)).append("\n");
+        builder.append(TextUtilsCompat.joinSpannable("\n", errors)).append("\n");
         return builder;
+    }
+
+    public static void ensurePackageStagingDirectoryPrivileged() throws ErrnoException {
+        if (!Paths.get("/data/local").canWrite()) {
+            return;
+        }
+        Path psd = Paths.get(PACKAGE_STAGING_DIRECTORY);
+        if (!psd.isDirectory()) {
+            // Recreate directory
+            Path parent = psd.getParent();
+            if (parent == null) {
+                throw new IllegalStateException("Parent should be /data/local");
+            }
+            if (psd.exists()) psd.delete();
+            psd.mkdir();
+        }
+        // Change permission
+        ExtendedFile f = Objects.requireNonNull(psd.getFile());
+        if ((f.getMode() & 0x1FF) != 0711) {
+            f.setMode(0711);
+        }
+        // Change UID, GID
+        UidGidPair uidGidPair = f.getUidGid();
+        if (uidGidPair.uid != 2000 || uidGidPair.gid != 2000) {
+            f.setUidGid(2000, 2000);
+        }
+    }
+
+    @NonNull
+    public static String ensurePackageStagingDirectoryCommand() {
+        String psd = PACKAGE_STAGING_DIRECTORY.getAbsolutePath();
+        return String.format("( [ -d  %s ] || ( rm %s; mkdir %s && chmod 771 %s && chown 2000:2000 %s ) )", psd, psd, psd, psd, psd);
+    }
+
+    /**
+     * Check if the given package name is valid.
+     *
+     * @param packageName The name to check.
+     * @return Success if it's valid.
+     * @see <a href="https://cs.android.com/android/platform/superproject/main/+/main:frameworks/base/core/java/android/content/pm/parsing/FrameworkParsingPackageUtils.java;l=72;drc=1bc76ef01ec070d5155d99be0c495fd4ee60d074">FrameworkParsingPackageUtils.java</a>
+     */
+    public static boolean validateName(@NonNull String packageName) {
+        if (packageName.equals("android")) {
+            // platform package
+            return true;
+        }
+        final int N = packageName.length();
+        boolean hasSep = false;
+        boolean front = true;
+        for (int i = 0; i < N; i++) {
+            final char c = packageName.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+                front = false;
+                continue;
+            }
+            if (!front) {
+                if ((c >= '0' && c <= '9') || c == '_') {
+                    continue;
+                }
+            }
+            if (c == '.') {
+                hasSep = true;
+                front = true;
+                continue;
+            }
+            return false;
+        }
+        return hasSep;
     }
 }

@@ -2,9 +2,24 @@
 
 package io.github.muntashirakon.AppManager.details.info;
 
+import static io.github.muntashirakon.AppManager.compat.ApplicationInfoCompat.HIDDEN_API_ENFORCEMENT_BLACK;
+import static io.github.muntashirakon.AppManager.compat.ApplicationInfoCompat.HIDDEN_API_ENFORCEMENT_DEFAULT;
+import static io.github.muntashirakon.AppManager.compat.ApplicationInfoCompat.HIDDEN_API_ENFORCEMENT_DISABLED;
+import static io.github.muntashirakon.AppManager.compat.ApplicationInfoCompat.HIDDEN_API_ENFORCEMENT_ENABLED;
+import static io.github.muntashirakon.AppManager.compat.ApplicationInfoCompat.HIDDEN_API_ENFORCEMENT_JUST_WARN;
+import static io.github.muntashirakon.AppManager.compat.ManifestCompat.permission.TERMUX_RUN_COMMAND;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.displayLongToast;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.displayShortToast;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getBitmapFromDrawable;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getColoredText;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getDimmedBitmap;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getSmallerText;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getStyledKeyValue;
+import static io.github.muntashirakon.AppManager.utils.UIUtils.getTitleText;
+import static io.github.muntashirakon.AppManager.utils.Utils.openAsFolderInFM;
+
 import android.Manifest;
-import android.content.ClipData;
-import android.content.ClipboardManager;
+import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -12,15 +27,11 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.content.pm.Signature;
 import android.graphics.Bitmap;
-import android.graphics.Typeface;
-import android.graphics.drawable.Drawable;
-import android.net.NetworkPolicyManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.RemoteException;
+import android.os.UserHandleHidden;
 import android.provider.Settings;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
@@ -33,162 +44,188 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.MimeTypeMap;
-import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.AnyThread;
-import androidx.annotation.ColorRes;
-import androidx.annotation.DrawableRes;
 import androidx.annotation.GuardedBy;
 import androidx.annotation.MainThread;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.annotation.StringRes;
 import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
-import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.widget.LinearLayoutCompat;
 import androidx.collection.ArrayMap;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.pm.PackageInfoCompat;
+import androidx.core.view.MenuProvider;
 import androidx.fragment.app.Fragment;
+import androidx.lifecycle.Lifecycle;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
-import com.android.internal.util.TextUtils;
-import com.google.android.material.chip.Chip;
-import com.google.android.material.chip.ChipGroup;
+import com.google.android.material.checkbox.MaterialCheckBox;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
-import com.google.android.material.textfield.TextInputEditText;
-import com.google.android.material.textfield.TextInputLayout;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.security.cert.CertificateEncodingException;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.Future;
 
-import io.github.muntashirakon.AppManager.AppManager;
 import io.github.muntashirakon.AppManager.BuildConfig;
 import io.github.muntashirakon.AppManager.R;
+import io.github.muntashirakon.AppManager.accessibility.AccessibilityMultiplexer;
+import io.github.muntashirakon.AppManager.accessibility.NoRootAccessibilityService;
 import io.github.muntashirakon.AppManager.apk.ApkFile;
+import io.github.muntashirakon.AppManager.apk.ApkSource;
 import io.github.muntashirakon.AppManager.apk.ApkUtils;
+import io.github.muntashirakon.AppManager.apk.behavior.FreezeUnfreeze;
+import io.github.muntashirakon.AppManager.apk.dexopt.DexOptDialog;
+import io.github.muntashirakon.AppManager.apk.behavior.FreezeUnfreezeShortcutInfo;
 import io.github.muntashirakon.AppManager.apk.installer.PackageInstallerActivity;
 import io.github.muntashirakon.AppManager.apk.installer.PackageInstallerCompat;
+import io.github.muntashirakon.AppManager.apk.signing.SignerInfo;
 import io.github.muntashirakon.AppManager.apk.whatsnew.WhatsNewDialogFragment;
-import io.github.muntashirakon.AppManager.backup.BackupDialogFragment;
+import io.github.muntashirakon.AppManager.backup.dialog.BackupRestoreDialogFragment;
+import io.github.muntashirakon.AppManager.batchops.BatchOpsManager;
+import io.github.muntashirakon.AppManager.batchops.BatchOpsService;
+import io.github.muntashirakon.AppManager.batchops.BatchQueueItem;
+import io.github.muntashirakon.AppManager.compat.ActivityManagerCompat;
+import io.github.muntashirakon.AppManager.compat.ApplicationInfoCompat;
+import io.github.muntashirakon.AppManager.compat.DeviceIdleManagerCompat;
+import io.github.muntashirakon.AppManager.compat.DomainVerificationManagerCompat;
+import io.github.muntashirakon.AppManager.compat.InstallSourceInfoCompat;
+import io.github.muntashirakon.AppManager.compat.ManifestCompat;
+import io.github.muntashirakon.AppManager.compat.NetworkPolicyManagerCompat;
+import io.github.muntashirakon.AppManager.compat.PackageInfoCompat2;
+import io.github.muntashirakon.AppManager.compat.PackageManagerCompat;
+import io.github.muntashirakon.AppManager.compat.SensorServiceCompat;
+import io.github.muntashirakon.AppManager.debloat.BloatwareDetailsDialog;
 import io.github.muntashirakon.AppManager.details.AppDetailsActivity;
 import io.github.muntashirakon.AppManager.details.AppDetailsFragment;
 import io.github.muntashirakon.AppManager.details.AppDetailsViewModel;
-import io.github.muntashirakon.AppManager.details.ManifestViewerActivity;
+import io.github.muntashirakon.AppManager.details.manifest.ManifestViewerActivity;
 import io.github.muntashirakon.AppManager.details.struct.AppDetailsItem;
 import io.github.muntashirakon.AppManager.fm.FmProvider;
+import io.github.muntashirakon.AppManager.fm.dialogs.OpenWithDialogFragment;
 import io.github.muntashirakon.AppManager.logcat.LogViewerActivity;
+import io.github.muntashirakon.AppManager.logcat.helper.ServiceHelper;
 import io.github.muntashirakon.AppManager.logcat.struct.SearchCriteria;
 import io.github.muntashirakon.AppManager.logs.Log;
-import io.github.muntashirakon.AppManager.profiles.ProfileManager;
-import io.github.muntashirakon.AppManager.profiles.ProfileMetaManager;
+import io.github.muntashirakon.AppManager.magisk.MagiskDenyList;
+import io.github.muntashirakon.AppManager.magisk.MagiskHide;
+import io.github.muntashirakon.AppManager.magisk.MagiskProcess;
+import io.github.muntashirakon.AppManager.profiles.AddToProfileDialogFragment;
 import io.github.muntashirakon.AppManager.rules.RulesTypeSelectionDialogFragment;
 import io.github.muntashirakon.AppManager.rules.compontents.ComponentsBlocker;
+import io.github.muntashirakon.AppManager.rules.struct.ComponentRule;
 import io.github.muntashirakon.AppManager.runner.Runner;
 import io.github.muntashirakon.AppManager.runner.RunnerUtils;
 import io.github.muntashirakon.AppManager.scanner.ScannerActivity;
-import io.github.muntashirakon.AppManager.servermanager.NetworkPolicyManagerCompat;
-import io.github.muntashirakon.AppManager.servermanager.PackageManagerCompat;
+import io.github.muntashirakon.AppManager.self.SelfPermissions;
+import io.github.muntashirakon.AppManager.self.imagecache.ImageLoader;
 import io.github.muntashirakon.AppManager.settings.FeatureController;
+import io.github.muntashirakon.AppManager.settings.Prefs;
 import io.github.muntashirakon.AppManager.sharedpref.SharedPrefsActivity;
+import io.github.muntashirakon.AppManager.shortcut.CreateShortcutDialogFragment;
+import io.github.muntashirakon.AppManager.ssaid.ChangeSsaidDialog;
 import io.github.muntashirakon.AppManager.types.PackageSizeInfo;
-import io.github.muntashirakon.AppManager.types.ScrollableDialogBuilder;
-import io.github.muntashirakon.AppManager.types.SearchableMultiChoiceDialogBuilder;
 import io.github.muntashirakon.AppManager.types.UserPackagePair;
+import io.github.muntashirakon.AppManager.uri.GrantUriUtils;
 import io.github.muntashirakon.AppManager.usage.AppUsageStatsManager;
-import io.github.muntashirakon.AppManager.utils.AppPref;
+import io.github.muntashirakon.AppManager.users.UserInfo;
+import io.github.muntashirakon.AppManager.users.Users;
 import io.github.muntashirakon.AppManager.utils.ArrayUtils;
 import io.github.muntashirakon.AppManager.utils.BetterActivityResult;
+import io.github.muntashirakon.AppManager.utils.ClipboardUtils;
+import io.github.muntashirakon.AppManager.utils.ContextUtils;
 import io.github.muntashirakon.AppManager.utils.DateUtils;
 import io.github.muntashirakon.AppManager.utils.DigestUtils;
-import io.github.muntashirakon.AppManager.utils.FileUtils;
+import io.github.muntashirakon.AppManager.utils.ExUtils;
+import io.github.muntashirakon.AppManager.utils.FreezeUtils;
+import io.github.muntashirakon.AppManager.utils.IntentUtils;
 import io.github.muntashirakon.AppManager.utils.KeyStoreUtils;
-import io.github.muntashirakon.AppManager.utils.MagiskUtils;
+import io.github.muntashirakon.AppManager.utils.LangUtils;
 import io.github.muntashirakon.AppManager.utils.PackageUtils;
-import io.github.muntashirakon.AppManager.utils.PermissionUtils;
-import io.github.muntashirakon.AppManager.utils.SsaidSettings;
+import io.github.muntashirakon.AppManager.utils.ThreadUtils;
 import io.github.muntashirakon.AppManager.utils.UIUtils;
-import io.github.muntashirakon.AppManager.utils.UiThreadHandler;
 import io.github.muntashirakon.AppManager.utils.Utils;
+import io.github.muntashirakon.AppManager.utils.appearance.ColorCodes;
+import io.github.muntashirakon.dialog.DialogTitleBuilder;
+import io.github.muntashirakon.dialog.ScrollableDialogBuilder;
+import io.github.muntashirakon.dialog.SearchableFlagsDialogBuilder;
+import io.github.muntashirakon.dialog.SearchableItemsDialogBuilder;
+import io.github.muntashirakon.dialog.SearchableMultiChoiceDialogBuilder;
 import io.github.muntashirakon.io.Path;
-import io.github.muntashirakon.io.ProxyFile;
+import io.github.muntashirakon.io.Paths;
+import io.github.muntashirakon.widget.SwipeRefreshLayout;
 
-import static io.github.muntashirakon.AppManager.details.info.ListItem.LIST_ITEM_FLAG_MONOSPACE;
-import static io.github.muntashirakon.AppManager.utils.PermissionUtils.TERMUX_PERM_RUN_COMMAND;
-import static io.github.muntashirakon.AppManager.utils.PermissionUtils.hasDumpPermission;
-import static io.github.muntashirakon.AppManager.utils.UIUtils.displayLongToast;
-import static io.github.muntashirakon.AppManager.utils.UIUtils.displayShortToast;
-import static io.github.muntashirakon.AppManager.utils.UIUtils.getSecondaryText;
-import static io.github.muntashirakon.AppManager.utils.UIUtils.getSmallerText;
-import static io.github.muntashirakon.AppManager.utils.Utils.openAsFolderInFM;
-
-public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRefreshListener {
+public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRefreshListener, MenuProvider {
     public static final String TAG = "AppInfoFragment";
 
     private static final String PACKAGE_NAME_AURORA_STORE = "com.aurora.store";
 
     private PackageManager mPackageManager;
     private String mPackageName;
+    private int mUserId;
+    @Nullable
+    private String mInstallerPackageName;
     private PackageInfo mPackageInfo;
+    @Nullable
     private PackageInfo mInstalledPackageInfo;
     private AppDetailsActivity mActivity;
     private ApplicationInfo mApplicationInfo;
-    private LinearLayoutCompat mHorizontalLayout;
-    private ChipGroup mTagCloud;
+    private ViewGroup mHorizontalLayout;
+    private ViewGroup mTagCloud;
     private SwipeRefreshLayout mSwipeRefresh;
-    private CharSequence mPackageLabel;
+    private CharSequence mAppLabel;
     private LinearProgressIndicator mProgressIndicator;
-    @Nullable
-    private AppDetailsViewModel mainModel;
-    private AppInfoViewModel model;
-    private AppInfoRecyclerAdapter adapter;
+    private AppDetailsViewModel mMainModel;
+    private AppInfoViewModel mAppInfoModel;
+    private AppInfoRecyclerAdapter mAdapter;
     // Headers
-    private TextView labelView;
-    private TextView packageNameView;
-    private TextView versionView;
-    private ImageView iconView;
+    private TextView mLabelView;
+    private TextView mPackageNameView;
+    private TextView mVersionView;
+    private ImageView mIconView;
+    private List<MagiskProcess> mMagiskHiddenProcesses;
+    private List<MagiskProcess> mMagiskDeniedProcesses;
+    private Future<?> mTagCloudFuture;
+    private Future<?> mActionsFuture;
+    private Future<?> mListFuture;
+    private Future<?> mMenuPreparationResult;
 
-    private final ExecutorService executor = Executors.newFixedThreadPool(3);
-
-    private boolean isExternalApk;
-    private boolean isRootEnabled;
-    private boolean isAdbEnabled;
+    private boolean mIsExternalApk;
+    private int mLoadedItemCount;
 
     @GuardedBy("mListItems")
     private final List<ListItem> mListItems = new ArrayList<>();
-    private final BetterActivityResult<String, Uri> export = BetterActivityResult
-            .registerForActivityResult(this, new ActivityResultContracts.CreateDocument());
-    private final BetterActivityResult<String, Boolean> requestPerm = BetterActivityResult
+    private final BetterActivityResult<String, Uri> mExport = BetterActivityResult
+            .registerForActivityResult(this, new ActivityResultContracts.CreateDocument("*/*"));
+    private final BetterActivityResult<String, Boolean> mRequestPerm = BetterActivityResult
             .registerForActivityResult(this, new ActivityResultContracts.RequestPermission());
-    private final BetterActivityResult<Intent, ActivityResult> activityLauncher = BetterActivityResult
+    private final BetterActivityResult<Intent, ActivityResult> mActivityLauncher = BetterActivityResult
             .registerActivityForResult(this);
 
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setHasOptionsMenu(true);
-        model = new ViewModelProvider(this).get(AppInfoViewModel.class);
+        mAppInfoModel = new ViewModelProvider(this).get(AppInfoViewModel.class);
+        mMainModel = new ViewModelProvider(requireActivity()).get(AppDetailsViewModel.class);
     }
 
     @Nullable
@@ -201,20 +238,13 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         mActivity = (AppDetailsActivity) requireActivity();
-        mainModel = mActivity.model;
-        if (mainModel == null) return;
-        model.setMainModel(mainModel);
-        isRootEnabled = AppPref.isRootEnabled();
-        isAdbEnabled = AppPref.isAdbEnabled();
+        mAppInfoModel.setMainModel(mMainModel);
         mPackageManager = mActivity.getPackageManager();
         // Swipe refresh
         mSwipeRefresh = view.findViewById(R.id.swipe_refresh);
-        mSwipeRefresh.setColorSchemeColors(UIUtils.getAccentColor(mActivity));
-        mSwipeRefresh.setProgressBackgroundColorSchemeColor(UIUtils.getPrimaryColor(mActivity));
         mSwipeRefresh.setOnRefreshListener(this);
         // Recycler view
         RecyclerView recyclerView = view.findViewById(android.R.id.list);
-        recyclerView.setHasFixedSize(true);
         recyclerView.setLayoutManager(new LinearLayoutManager(mActivity));
         // Horizontal view
         mHorizontalLayout = view.findViewById(R.id.horizontal_layout);
@@ -224,117 +254,182 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
         showProgressIndicator(true);
         // Header
         mTagCloud = view.findViewById(R.id.tag_cloud);
-        labelView = view.findViewById(R.id.label);
-        packageNameView = view.findViewById(R.id.packageName);
-        mPackageName = mainModel.getPackageName();
-        iconView = view.findViewById(R.id.icon);
-        versionView = view.findViewById(R.id.version);
-        isExternalApk = mainModel.getIsExternalApk();
-        // Set adapter only after package info is loaded
-        executor.submit(() -> {
-            mPackageName = mainModel.getPackageName();
-            if (mPackageName == null) {
-                mainModel.setPackageInfo(false);
-                mPackageName = mainModel.getPackageName();
-            }
-            isExternalApk = mainModel.getIsExternalApk();
-            adapter = new AppInfoRecyclerAdapter(mActivity);
-            runOnUiThread(() -> recyclerView.setAdapter(adapter));
-        });
+        mLabelView = view.findViewById(R.id.label);
+        mPackageNameView = view.findViewById(R.id.packageName);
+        mIconView = view.findViewById(R.id.icon);
+        mVersionView = view.findViewById(R.id.version);
+        mAdapter = new AppInfoRecyclerAdapter(requireContext());
+        recyclerView.setAdapter(mAdapter);
+        mActivity.addMenuProvider(this, getViewLifecycleOwner(), Lifecycle.State.RESUMED);
         // Set observer
-        mainModel.get(AppDetailsFragment.APP_INFO).observe(getViewLifecycleOwner(), appDetailsItems -> {
-            if (appDetailsItems != null && !appDetailsItems.isEmpty() && mainModel.isPackageExist()) {
-                AppDetailsItem appDetailsItem = appDetailsItems.get(0);
-                mPackageInfo = (PackageInfo) appDetailsItem.vanillaItem;
-                mPackageName = appDetailsItem.name;
-                mInstalledPackageInfo = mainModel.getInstalledPackageInfo();
-                mApplicationInfo = mPackageInfo.applicationInfo;
-                // Set package name
-                packageNameView.setText(mPackageName);
-                packageNameView.setOnClickListener(v -> {
-                    ClipboardManager clipboard = (ClipboardManager) mActivity.getSystemService(Context.CLIPBOARD_SERVICE);
-                    ClipData clip = ClipData.newPlainText("Package Name", mPackageName);
-                    clipboard.setPrimaryClip(clip);
-                    displayShortToast(R.string.copied_to_clipboard);
-                });
-                // Set App Version
-                CharSequence version = getString(R.string.version_name_with_code, mPackageInfo.versionName, PackageInfoCompat.getLongVersionCode(mPackageInfo));
-                versionView.setText(version);
-                // Set others
-                executor.submit(this::loadPackageInfo);
-            } else showProgressIndicator(false);
+        mMainModel.get(AppDetailsFragment.APP_INFO).observe(getViewLifecycleOwner(), appDetailsItems -> {
+            mLoadedItemCount = 0;
+            if (appDetailsItems == null || appDetailsItems.isEmpty() || !mMainModel.isPackageExist()) {
+                showProgressIndicator(false);
+                return;
+            }
+            ++mLoadedItemCount;
+            AppDetailsItem<?> appDetailsItem = appDetailsItems.get(0);
+            mPackageInfo = (PackageInfo) appDetailsItem.item;
+            mApplicationInfo = mPackageInfo.applicationInfo;
+            mPackageName = appDetailsItem.name;
+            mUserId = mMainModel.getUserId();
+            mInstalledPackageInfo = mMainModel.getInstalledPackageInfo();
+            mIsExternalApk = mMainModel.isExternalApk();
+            if (!mIsExternalApk) {
+                mInstallerPackageName = PackageManagerCompat.getInstallerPackageName(mPackageName, mUserId);
+            }
+            // Set icon
+            ImageLoader.getInstance().displayImage(mPackageName, mApplicationInfo, mIconView);
+            // Set package name
+            mPackageNameView.setText(mPackageName);
+            mPackageNameView.setOnClickListener(v ->
+                    Utils.copyToClipboard(ContextUtils.getContext(), "Package name", mPackageName));
+            // Set App Version
+            CharSequence version = getString(R.string.version_name_with_code, mPackageInfo.versionName, PackageInfoCompat.getLongVersionCode(mPackageInfo));
+            mVersionView.setText(version);
+            // Load app label
+            mAppInfoModel.loadAppLabel(mApplicationInfo);
+            // Load tag cloud
+            mAppInfoModel.loadTagCloud(mPackageInfo, mIsExternalApk);
+            // Load horizontal actions
+            setupHorizontalActions();
+            // Load other info
+            mAppInfoModel.loadAppInfo(mPackageInfo, mIsExternalApk);
         });
-        model.getPackageLabel().observe(getViewLifecycleOwner(), packageLabel -> {
-            mPackageLabel = packageLabel;
+        mAppInfoModel.getAppLabel().observe(getViewLifecycleOwner(), appLabel -> {
+            ++mLoadedItemCount;
+            if (mLoadedItemCount >= 4) {
+                showProgressIndicator(false);
+            }
+            mAppLabel = appLabel;
             // Set Application Name, aka Label
-            labelView.setText(mPackageLabel);
+            mLabelView.setText(mAppLabel);
         });
-        iconView.setOnClickListener(v -> {
-            ClipboardManager clipboard = (ClipboardManager) mActivity.getSystemService(Context.CLIPBOARD_SERVICE);
-            executor.submit(() -> {
-                ClipData clipData = clipboard.getPrimaryClip();
-                if (clipData != null && clipData.getItemCount() > 0) {
-                    String data = clipData.getItemAt(0).getText().toString().trim().toLowerCase(Locale.ROOT);
-                    if (data.matches("[0-9a-f: \n]+")) {
-                        data = data.replaceAll("[: \n]+", "");
-                        Signature[] signatures = PackageUtils.getSigningInfo(mPackageInfo, isExternalApk);
-                        if (signatures != null && signatures.length == 1) {
-                            byte[] certBytes = signatures[0].toByteArray();
-                            Pair<String, String>[] digests = DigestUtils.getDigests(certBytes);
-                            for (Pair<String, String> digest : digests) {
-                                if (digest.second.equals(data)) {
-                                    if (digest.first.equals(DigestUtils.MD5) || digest.first.equals(DigestUtils.SHA_1)) {
-                                        runOnUiThread(() -> displayLongToast(R.string.verified_using_unreliable_hash));
-                                    } else runOnUiThread(() -> displayLongToast(R.string.verified));
-                                    return;
+        mMainModel.getFreezeTypeLiveData().observe(getViewLifecycleOwner(), freezeType -> {
+            int freezeTypeN = Optional.ofNullable(freezeType)
+                    .orElse(Prefs.Blocking.getDefaultFreezingMethod());
+            showFreezeDialog(freezeTypeN, freezeType != null);
+        });
+        mIconView.setOnClickListener(v -> {
+            ThreadUtils.postOnBackgroundThread(() -> {
+                String data = ClipboardUtils.readHashValueFromClipboard(ContextUtils.getContext());
+                if (data != null) {
+                    SignerInfo signerInfo = PackageUtils.getSignerInfo(mPackageInfo, mIsExternalApk);
+                    if (signerInfo != null) {
+                        X509Certificate[] certs = signerInfo.getCurrentSignerCerts();
+                        if (certs != null && certs.length == 1) {
+                            try {
+                                Pair<String, String>[] digests = DigestUtils.getDigests(certs[0].getEncoded());
+                                for (Pair<String, String> digest : digests) {
+                                    if (digest.second.equals(data)) {
+                                        if (digest.first.equals(DigestUtils.MD5) || digest.first.equals(DigestUtils.SHA_1)) {
+                                            ThreadUtils.postOnMainThread(() -> displayLongToast(R.string.verified_using_unreliable_hash));
+                                        } else
+                                            ThreadUtils.postOnMainThread(() -> displayLongToast(R.string.verified));
+                                        return;
+                                    }
                                 }
+                            } catch (CertificateEncodingException ignore) {
                             }
                         }
-                        runOnUiThread(() -> displayLongToast(R.string.not_verified));
                     }
+                    ThreadUtils.postOnMainThread(() -> displayLongToast(R.string.not_verified));
                 }
             });
         });
-        setupTagCloud();
-        setupVerticalView();
+        mAppInfoModel.getTagCloud().observe(getViewLifecycleOwner(), this::setupTagCloud);
+        mAppInfoModel.getAppInfo().observe(getViewLifecycleOwner(), this::setupVerticalView);
+        mAppInfoModel.getInstallExistingResult().observe(getViewLifecycleOwner(), statusMessagePair ->
+                new MaterialAlertDialogBuilder(requireActivity())
+                        .setTitle(mAppLabel)
+                        .setIcon(mApplicationInfo.loadIcon(mPackageManager))
+                        .setMessage(statusMessagePair.second)
+                        .setNegativeButton(R.string.close, null)
+                        .show());
+        mMainModel.getTagsAlteredLiveData().observe(getViewLifecycleOwner(), altered -> {
+            // Reload tag cloud
+            mAppInfoModel.loadTagCloud(mPackageInfo, mIsExternalApk);
+        });
     }
 
     @Override
-    public void onCreateOptionsMenu(@NonNull Menu menu, @NonNull MenuInflater inflater) {
-        if (mainModel != null && !mainModel.getIsExternalApk()) {
+    public void onCreateMenu(@NonNull Menu menu, @NonNull MenuInflater inflater) {
+        if (mMainModel != null && !mMainModel.isExternalApk()) {
             inflater.inflate(R.menu.fragment_app_info_actions, menu);
         }
     }
 
     @Override
-    public void onPrepareOptionsMenu(@NonNull Menu menu) {
-        if (isExternalApk) return;
-        try {
-            menu.findItem(R.id.action_open_in_termux).setVisible(isRootEnabled);
-            menu.findItem(R.id.action_enable_magisk_hide).setVisible(isRootEnabled);
-            boolean isDebuggable = false;
-            if (mApplicationInfo != null) {
-                isDebuggable = (mApplicationInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    public void onPrepareMenu(@NonNull Menu menu) {
+        if (mIsExternalApk) return;
+        MenuItem magiskHideMenu = menu.findItem(R.id.action_magisk_hide);
+        MenuItem magiskDenyListMenu = menu.findItem(R.id.action_magisk_denylist);
+        MenuItem openInTermuxMenu = menu.findItem(R.id.action_open_in_termux);
+        MenuItem runInTermuxMenu = menu.findItem(R.id.action_run_in_termux);
+        MenuItem batteryOptMenu = menu.findItem(R.id.action_battery_opt);
+        MenuItem sensorsMenu = menu.findItem(R.id.action_sensor);
+        MenuItem netPolicyMenu = menu.findItem(R.id.action_net_policy);
+        MenuItem installMenu = menu.findItem(R.id.action_install);
+        MenuItem optimizeMenu = menu.findItem(R.id.action_optimize);
+        mMenuPreparationResult = ThreadUtils.postOnBackgroundThread(() -> {
+            boolean magiskHideAvailable = MagiskHide.available();
+            boolean magiskDenyListAvailable = MagiskDenyList.available();
+            boolean rootAvailable = RunnerUtils.isRootAvailable();
+            if (ThreadUtils.isInterrupted()) {
+                return;
             }
-            menu.findItem(R.id.action_run_in_termux).setVisible(isDebuggable);
-            menu.findItem(R.id.action_battery_opt).setVisible(isRootEnabled || isAdbEnabled);
-            menu.findItem(R.id.action_net_policy).setVisible(isRootEnabled || isAdbEnabled);
-        } catch (NullPointerException ignore) {
-            // Options menu is uninitialised for some reason, just suppress the exception
+            ThreadUtils.postOnMainThread(() -> {
+                if (magiskHideMenu != null) {
+                    magiskHideMenu.setVisible(magiskHideAvailable);
+                }
+                if (magiskDenyListMenu != null) {
+                    magiskDenyListMenu.setVisible(magiskDenyListAvailable);
+                }
+                if (openInTermuxMenu != null) {
+                    openInTermuxMenu.setVisible(rootAvailable);
+                }
+            });
+        });
+        boolean isDebuggable;
+        if (mApplicationInfo != null) {
+            isDebuggable = (mApplicationInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        } else isDebuggable = false;
+        if (runInTermuxMenu != null) {
+            runInTermuxMenu.setVisible(isDebuggable);
+        }
+        if (batteryOptMenu != null) {
+            batteryOptMenu.setVisible(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M);
+        }
+        if (sensorsMenu != null) {
+            sensorsMenu.setVisible(Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                    && SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.MANAGE_SENSORS));
+        }
+        if (netPolicyMenu != null) {
+            netPolicyMenu.setVisible(Build.VERSION.SDK_INT >= Build.VERSION_CODES.N);
+        }
+        if (installMenu != null) {
+            installMenu.setVisible(Users.getUsersIds().length > 1 && SelfPermissions.canInstallExistingPackages());
+        }
+        if (optimizeMenu != null) {
+            optimizeMenu.setVisible(Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                    && (SelfPermissions.isSystemOrRootOrShell() || BuildConfig.APPLICATION_ID.equals(mInstallerPackageName)));
         }
     }
 
     @Override
-    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+    public boolean onMenuItemSelected(@NonNull MenuItem item) {
         int itemId = item.getItemId();
         if (itemId == R.id.action_refresh_detail) {
             refreshDetails();
         } else if (itemId == R.id.action_share_apk) {
-            executor.submit(() -> {
+            showProgressIndicator(true);
+            ThreadUtils.postOnBackgroundThread(() -> {
                 try {
-                    Path tmpApkSource = ApkUtils.getSharableApkFile(mPackageInfo);
-                    UiThreadHandler.run(() -> {
-                        Context ctx = AppManager.getContext();
+                    Path tmpApkSource = ApkUtils.getSharableApkFile(requireContext(), mPackageInfo);
+                    ThreadUtils.postOnMainThread(() -> {
+                        showProgressIndicator(false);
+                        Context ctx = ContextUtils.getContext();
                         Intent intent = new Intent(Intent.ACTION_SEND)
                                 .setType("application/*")
                                 .putExtra(Intent.EXTRA_STREAM, FmProvider.getContentUri(tmpApkSource))
@@ -348,24 +443,26 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
                 }
             });
         } else if (itemId == R.id.action_backup) {
-            if (mainModel == null) return true;
-            BackupDialogFragment backupDialogFragment = new BackupDialogFragment();
-            Bundle args = new Bundle();
-            args.putParcelableArrayList(BackupDialogFragment.ARG_PACKAGE_PAIRS, new ArrayList<>(
-                    Collections.singleton(new UserPackagePair(mPackageName, mainModel.getUserHandle()))));
-            backupDialogFragment.setArguments(args);
-            backupDialogFragment.setOnActionBeginListener(mode -> showProgressIndicator(true));
-            backupDialogFragment.setOnActionCompleteListener((mode, failedPackages) -> showProgressIndicator(false));
-            backupDialogFragment.show(mActivity.getSupportFragmentManager(), BackupDialogFragment.TAG);
+            if (mMainModel == null) return true;
+            BackupRestoreDialogFragment fragment = BackupRestoreDialogFragment.getInstanceWithPref(
+                    Collections.singletonList(new UserPackagePair(mPackageName, mUserId)), mUserId);
+            fragment.setOnActionBeginListener(mode -> showProgressIndicator(true));
+            fragment.setOnActionCompleteListener((mode, failedPackages) -> {
+                showProgressIndicator(false);
+                mMainModel.getTagsAlteredLiveData().setValue(true);
+            });
+            fragment.show(getParentFragmentManager(), BackupRestoreDialogFragment.TAG);
         } else if (itemId == R.id.action_view_settings) {
-            Intent infoIntent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            infoIntent.addCategory(Intent.CATEGORY_DEFAULT);
-            infoIntent.setData(Uri.parse("package:" + mPackageName));
-            startActivity(infoIntent);
+            try {
+                ActivityManagerCompat.startActivity(IntentUtils.getAppDetailsSettings(mPackageName), mUserId);
+            } catch (Throwable th) {
+                UIUtils.displayLongToast("Error: " + th.getLocalizedMessage());
+            }
         } else if (itemId == R.id.action_export_blocking_rules) {
-            final String fileName = "app_manager_rules_export-" + DateUtils.formatDateTime(System.currentTimeMillis()) + ".am.tsv";
-            export.launch(fileName, uri -> {
-                if (uri == null || mainModel == null) {
+            final String fileName = "app_manager_rules_export-"
+                    + DateUtils.formatDateTimeForFilename(mActivity, System.currentTimeMillis()) + ".am.tsv";
+            mExport.launch(fileName, uri -> {
+                if (uri == null || mMainModel == null) {
                     // Back button pressed.
                     return;
                 }
@@ -376,141 +473,185 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
                 exportArgs.putInt(RulesTypeSelectionDialogFragment.ARG_MODE, RulesTypeSelectionDialogFragment.MODE_EXPORT);
                 exportArgs.putParcelable(RulesTypeSelectionDialogFragment.ARG_URI, uri);
                 exportArgs.putStringArrayList(RulesTypeSelectionDialogFragment.ARG_PKG, packages);
-                exportArgs.putIntArray(RulesTypeSelectionDialogFragment.ARG_USERS, new int[]{mainModel.getUserHandle()});
+                exportArgs.putIntArray(RulesTypeSelectionDialogFragment.ARG_USERS, new int[]{mUserId});
                 dialogFragment.setArguments(exportArgs);
                 dialogFragment.show(mActivity.getSupportFragmentManager(), RulesTypeSelectionDialogFragment.TAG);
             });
         } else if (itemId == R.id.action_open_in_termux) {
-            if (PermissionUtils.hasTermuxPermission(mActivity)) {
+            if (SelfPermissions.checkSelfPermission(TERMUX_RUN_COMMAND)) {
                 openInTermux();
-            } else requestPerm.launch(TERMUX_PERM_RUN_COMMAND, granted -> {
-                if (granted) openInTermux();
-            });
-        } else if (itemId == R.id.action_run_in_termux) {
-            if (PermissionUtils.hasTermuxPermission(mActivity)) {
-                runInTermux();
-            } else requestPerm.launch(TERMUX_PERM_RUN_COMMAND, granted -> {
-                if (granted) runInTermux();
-            });
-        } else if (itemId == R.id.action_enable_magisk_hide) {
-            if (mainModel == null) return true;
-            if (MagiskUtils.hide(mPackageName)) {
-                try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(mPackageName, mainModel.getUserHandle())) {
-                    cb.setMagiskHide(true);
-                    refreshDetails();
-                }
             } else {
-                displayLongToast(R.string.failed_to_enable_magisk_hide);
+                mRequestPerm.launch(TERMUX_RUN_COMMAND, granted -> {
+                    if (granted) openInTermux();
+                });
             }
+        } else if (itemId == R.id.action_run_in_termux) {
+            if (SelfPermissions.checkSelfPermission(TERMUX_RUN_COMMAND)) {
+                runInTermux();
+            } else {
+                mRequestPerm.launch(TERMUX_RUN_COMMAND, granted -> {
+                    if (granted) runInTermux();
+                });
+            }
+        } else if (itemId == R.id.action_magisk_hide) {
+            displayMagiskHideDialog();
+        } else if (itemId == R.id.action_magisk_denylist) {
+            displayMagiskDenyListDialog();
         } else if (itemId == R.id.action_battery_opt) {
-            if (hasDumpPermission()) {
-                new MaterialAlertDialogBuilder(mActivity)
+            if (SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.DEVICE_POWER)) {
+                new MaterialAlertDialogBuilder(requireContext())
                         .setTitle(R.string.battery_optimization)
                         .setMessage(R.string.choose_what_to_do)
                         .setPositiveButton(R.string.enable, (dialog, which) -> {
-                            Runner.runCommand(new String[]{"dumpsys", "deviceidle", "whitelist", "-" + mPackageName});
-                            refreshDetails();
+                            if (DeviceIdleManagerCompat.enableBatteryOptimization(mPackageName)) {
+                                UIUtils.displayShortToast(R.string.done);
+                                mMainModel.getTagsAlteredLiveData().setValue(true);
+                            } else {
+                                UIUtils.displayShortToast(R.string.failed);
+                            }
                         })
                         .setNegativeButton(R.string.disable, (dialog, which) -> {
-                            Runner.runCommand(new String[]{"dumpsys", "deviceidle", "whitelist", "+" + mPackageName});
-                            refreshDetails();
+                            if (DeviceIdleManagerCompat.disableBatteryOptimization(mPackageName)) {
+                                UIUtils.displayShortToast(R.string.done);
+                                mMainModel.getTagsAlteredLiveData().setValue(true);
+                            } else {
+                                UIUtils.displayShortToast(R.string.failed);
+                            }
                         })
                         .show();
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                try {
+                    startActivity(IntentUtils.getBatteryOptSettings(mPackageName));
+                } catch (Throwable th) {
+                    UIUtils.displayShortToast("No DEVICE_POWER permission.");
+                }
+            }
+        } else if (itemId == R.id.action_sensor) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.MANAGE_SENSORS)) {
+                new MaterialAlertDialogBuilder(requireContext())
+                        .setTitle(R.string.sensors)
+                        .setMessage(R.string.choose_what_to_do)
+                        .setPositiveButton(R.string.enable, (dialog, which) -> ThreadUtils.postOnBackgroundThread(() -> {
+                            try {
+                                SensorServiceCompat.enableSensor(mPackageName, mUserId, true);
+                                mMainModel.getTagsAlteredLiveData().postValue(true);
+                                ThreadUtils.postOnMainThread(() ->
+                                        UIUtils.displayShortToast(R.string.done));
+                            } catch (IOException e) {
+                                ThreadUtils.postOnMainThread(() -> UIUtils.displayLongToast(
+                                        getString(R.string.failed)
+                                                + LangUtils.getSeparatorString()
+                                                + e.getMessage()));
+                            }
+                        }))
+                        .setNegativeButton(R.string.disable, (dialog, which) -> ThreadUtils.postOnBackgroundThread(() -> {
+                            try {
+                                SensorServiceCompat.enableSensor(mPackageName, mUserId, false);
+                                mMainModel.getTagsAlteredLiveData().postValue(true);
+                                ThreadUtils.postOnMainThread(() ->
+                                        UIUtils.displayShortToast(R.string.done));
+                            } catch (IOException e) {
+                                ThreadUtils.postOnMainThread(() -> UIUtils.displayLongToast(
+                                        getString(R.string.failed)
+                                                + LangUtils.getSeparatorString()
+                                                + e.getMessage()));
+                            }
+                        }))
+                        .show();
             } else {
-                Log.e(TAG, "No DUMP permission.");
+                Log.e(TAG, "No sensor permission.");
             }
         } else if (itemId == R.id.action_net_policy) {
-            ArrayMap<Integer, String> netPolicyMap = NetworkPolicyManagerCompat.getAllReadablePolicies(mActivity);
-            int[] polices = new int[netPolicyMap.size()];
-            String[] policyStrings = new String[netPolicyMap.size()];
-            boolean[] choices = new boolean[netPolicyMap.size()];
-            AtomicInteger selectedPolicies = new AtomicInteger(NetworkPolicyManagerCompat.getUidPolicy(mApplicationInfo.uid));
+            if (!UserHandleHidden.isApp(mApplicationInfo.uid)) {
+                UIUtils.displayLongToast(R.string.netpolicy_cannot_be_modified_for_core_apps);
+                return true;
+            }
+            if (!SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.MANAGE_NETWORK_POLICY)) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    try {
+                        startActivity(IntentUtils.getNetPolicySettings(mPackageName));
+                    } catch (Throwable th) {
+                        UIUtils.displayShortToast("No MANAGE_NETWORK_POLICY permission.");
+                    }
+                }
+                return true;
+            }
+            ArrayMap<Integer, String> netPolicyMap = NetworkPolicyManagerCompat.getAllReadablePolicies(ContextUtils.getContext());
+            Integer[] polices = new Integer[netPolicyMap.size()];
+            CharSequence[] policyStrings = new String[netPolicyMap.size()];
+            int selectedPolicies = NetworkPolicyManagerCompat.getUidPolicy(mApplicationInfo.uid);
             for (int i = 0; i < netPolicyMap.size(); ++i) {
                 polices[i] = netPolicyMap.keyAt(i);
                 policyStrings[i] = netPolicyMap.valueAt(i);
-                if (selectedPolicies.get() == 0) {
-                    choices[i] = polices[i] == NetworkPolicyManager.POLICY_NONE;
-                } else {
-                    choices[i] = (selectedPolicies.get() & polices[i]) != 0;
-                }
             }
-            new MaterialAlertDialogBuilder(mActivity)
+            new SearchableFlagsDialogBuilder<>(mActivity, polices, policyStrings, selectedPolicies)
                     .setTitle(R.string.net_policy)
-                    .setMultiChoiceItems(policyStrings, choices, (dialog, which, isChecked) -> {
-                        int currentPolicies = selectedPolicies.get();
-                        if (isChecked) selectedPolicies.set(currentPolicies | polices[which]);
-                        else selectedPolicies.set(currentPolicies & ~polices[which]);
-                    })
+                    .showSelectAll(false)
                     .setNegativeButton(R.string.cancel, null)
-                    .setPositiveButton(R.string.save, (dialog, which) -> {
-                        try {
-                            NetworkPolicyManagerCompat.setUidPolicy(mApplicationInfo.uid, selectedPolicies.get());
-                            refreshDetails();
-                        } catch (RemoteException e) {
-                            e.printStackTrace();
+                    .setPositiveButton(R.string.save, (dialog, which, selections) -> {
+                        int flags = 0;
+                        for (int flag : selections) {
+                            flags |= flag;
                         }
+                        NetworkPolicyManagerCompat.setUidPolicy(mApplicationInfo.uid, flags);
+                        mMainModel.getTagsAlteredLiveData().setValue(true);
                     })
                     .show();
         } else if (itemId == R.id.action_extract_icon) {
-            String iconName = mPackageLabel + "_icon.png";
-            export.launch(iconName, uri -> {
+            String iconName = mAppLabel + "_icon.png";
+            mExport.launch(iconName, uri -> {
                 if (uri == null) {
                     // Back button pressed.
                     return;
                 }
-                try {
-                    try (OutputStream outputStream = mActivity.getContentResolver().openOutputStream(uri)) {
+                ThreadUtils.postOnBackgroundThread(() -> {
+                    try (OutputStream outputStream = Paths.get(uri).openOutputStream()) {
                         if (outputStream == null) {
                             throw new IOException("Unable to open output stream.");
                         }
-                        Bitmap bitmap = FileUtils.getBitmapFromDrawable(mApplicationInfo.loadIcon(mPackageManager));
+                        Bitmap bitmap = getBitmapFromDrawable(mApplicationInfo.loadIcon(mPackageManager));
                         bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream);
                         outputStream.flush();
-                        displayShortToast(R.string.saved_successfully);
+                        ThreadUtils.postOnMainThread(() -> displayShortToast(R.string.saved_successfully));
+                    } catch (IOException e) {
+                        Log.e(TAG, e);
+                        ThreadUtils.postOnMainThread(() -> displayShortToast(R.string.saving_failed));
                     }
-                } catch (IOException e) {
-                    Log.e(TAG, e);
-                    displayShortToast(R.string.saving_failed);
-                }
+                });
             });
-        } else if (itemId == R.id.action_add_to_profile) {
-            HashMap<String, ProfileMetaManager> profilesMap = ProfileManager.getProfileMetadata();
-            List<CharSequence> profileNames = new ArrayList<>(profilesMap.size());
-            List<ProfileMetaManager> profiles = new ArrayList<>(profilesMap.size());
-            ProfileMetaManager profileMetaManager;
-            Spannable summary;
-            for (String profileName : profilesMap.keySet()) {
-                profileMetaManager = profilesMap.get(profileName);
-                //noinspection ConstantConditions
-                summary = TextUtils.joinSpannable(", ", profileMetaManager.getLocalisedSummaryOrComment(mActivity));
-                profiles.add(profileMetaManager);
-                profileNames.add(new SpannableStringBuilder(profileName).append("\n").append(getSecondaryText(mActivity, getSmallerText(summary))));
+        } else if (itemId == R.id.action_install) {
+            List<UserInfo> users = Users.getUsers();
+            CharSequence[] userNames = new String[users.size()];
+            int i = 0;
+            for (UserInfo info : users) {
+                userNames[i++] = info.toLocalizedString(requireContext());
             }
-            new SearchableMultiChoiceDialogBuilder<>(mActivity, profiles, profileNames)
-                    .setTitle(R.string.add_to_profile)
-                    .setNegativeButton(R.string.cancel, null)
-                    .setPositiveButton(R.string.add, (dialog, which, selectedItems) -> {
-                        for (ProfileMetaManager metaManager : selectedItems) {
-                            if (metaManager.profile != null) {
-                                try {
-                                    metaManager.profile.packages = ArrayUtils.appendElement(String.class,
-                                            metaManager.profile.packages, mPackageName);
-                                    metaManager.writeProfile();
-                                } catch (Throwable e) {
-                                    e.printStackTrace();
-                                }
-                            }
-                        }
+            new SearchableItemsDialogBuilder<>(mActivity, userNames)
+                    .setTitle(R.string.select_user)
+                    .setOnItemClickListener((dialog, which, item1) -> {
+                        mAppInfoModel.installExisting(mPackageName, users.get(which).id);
+                        dialog.dismiss();
                     })
+                    .setNegativeButton(R.string.cancel, null)
                     .show();
-        } else return super.onOptionsItemSelected(item);
+        } else if (itemId == R.id.action_add_to_profile) {
+            AddToProfileDialogFragment dialog = AddToProfileDialogFragment.getInstance(new String[]{mPackageName});
+            dialog.show(getChildFragmentManager(), AddToProfileDialogFragment.TAG);
+        } else if (itemId == R.id.action_optimize) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                    && (SelfPermissions.isSystemOrRootOrShell() || BuildConfig.APPLICATION_ID.equals(mInstallerPackageName))) {
+                DexOptDialog dialog = DexOptDialog.getInstance(new String[]{mPackageName});
+                dialog.show(getChildFragmentManager(), DexOptDialog.TAG);
+            } else UIUtils.displayShortToast(R.string.only_works_in_root_or_adb_mode);
+        } else return false;
         return true;
     }
 
     @Override
-    public void onStart() {
-        super.onStart();
-        if (mActivity.searchView != null) mActivity.searchView.setVisibility(View.GONE);
+    public void onMenuClosed(@NonNull Menu menu) {
+        if (mMenuPreparationResult != null) {
+            mMenuPreparationResult.cancel(true);
+        }
     }
 
     @Override
@@ -527,16 +668,10 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
 
     @Override
     public void onDetach() {
-        executor.shutdownNow();
+        if (mTagCloudFuture != null) mTagCloudFuture.cancel(true);
+        if (mActionsFuture != null) mActionsFuture.cancel(true);
+        if (mListFuture != null) mListFuture.cancel(true);
         super.onDetach();
-    }
-
-    @Override
-    public void onDestroy() {
-        if (mActivity != null) {
-            FileUtils.deleteDir(mActivity.getExternalCacheDir());
-        }
-        super.onDestroy();
     }
 
     private void openInTermux() {
@@ -557,511 +692,890 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
         try {
             ActivityCompat.startForegroundService(mActivity, intent);
         } catch (Exception e) {
-            e.printStackTrace();
+            UIUtils.displayLongToast("Error: " + e.getMessage());
         }
     }
 
     private void install() {
-        if (mainModel == null) return;
-        Intent intent = new Intent(this.getContext(), PackageInstallerActivity.class);
-        intent.putExtra(PackageInstallerActivity.EXTRA_APK_FILE_KEY, mainModel.getApkFileKey());
+        ApkSource apkSource = mMainModel != null ? mMainModel.getApkSource() : null;
+        if (apkSource == null) return;
         try {
-            startActivity(intent);
-        } catch (Exception ignore) {
+            startActivity(PackageInstallerActivity.getLaunchableInstance(requireContext(), apkSource));
+        } catch (Exception e) {
+            UIUtils.displayLongToast("Error: " + e.getMessage());
         }
     }
 
+    @UiThread
     private void refreshDetails() {
-        if (mainModel == null) return;
+        if (mMainModel == null || isDetached()) return;
         showProgressIndicator(true);
-        mainModel.setIsPackageChanged();
+        mMainModel.triggerPackageChange();
+    }
+
+    @MainThread
+    private void setupTagCloud(@NonNull AppInfoViewModel.TagCloud tagCloud) {
+        if (mTagCloudFuture != null) mTagCloudFuture.cancel(true);
+        mTagCloudFuture = ThreadUtils.postOnBackgroundThread(() -> {
+            List<TagItem> tagItems = getTagCloudItems(tagCloud);
+            ThreadUtils.postOnMainThread(() -> {
+                if (isDetached()) return;
+                ++mLoadedItemCount;
+                if (mLoadedItemCount >= 4) {
+                    showProgressIndicator(false);
+                }
+                mTagCloud.removeAllViews();
+                for (TagItem tagItem : tagItems) {
+                    if (isDetached()) return;
+                    mTagCloud.addView(tagItem.toChip(mTagCloud.getContext(), mTagCloud));
+                }
+            });
+        });
+    }
+
+    @WorkerThread
+    @NonNull
+    private List<TagItem> getTagCloudItems(@NonNull AppInfoViewModel.TagCloud tagCloud) {
+        Objects.requireNonNull(mMainModel);
+        Context context = mTagCloud.getContext();
+        List<TagItem> tagItems = new LinkedList<>();
+        // Add tracker chip
+        if (!tagCloud.trackerComponents.isEmpty()) {
+            CharSequence[] trackerComponentNames = new CharSequence[tagCloud.trackerComponents.size()];
+            int blockedColor = ColorCodes.getComponentTrackerBlockedIndicatorColor(context);
+            for (int i = 0; i < trackerComponentNames.length; ++i) {
+                ComponentRule rule = tagCloud.trackerComponents.get(i);
+                trackerComponentNames[i] = rule.isBlocked() ? getColoredText(rule.name, blockedColor) : rule.name;
+            }
+            TagItem trackerTag = new TagItem();
+            tagItems.add(trackerTag);
+            trackerTag.setText(getResources().getQuantityString(R.plurals.no_of_trackers,
+                            tagCloud.trackerComponents.size(), tagCloud.trackerComponents.size()))
+                    .setColor(tagCloud.areAllTrackersBlocked
+                            ? ColorCodes.getComponentTrackerBlockedIndicatorColor(context)
+                            : ColorCodes.getComponentTrackerIndicatorColor(context))
+                    .setOnClickListener(v -> {
+                        if (!mIsExternalApk && SelfPermissions.canModifyAppComponentStates(mUserId, mPackageName, mMainModel.isTestOnlyApp())) {
+                            new SearchableMultiChoiceDialogBuilder<>(v.getContext(), tagCloud.trackerComponents, trackerComponentNames)
+                                    .setTitle(R.string.trackers)
+                                    .addSelections(tagCloud.trackerComponents)
+                                    .setNegativeButton(R.string.cancel, null)
+                                    .setPositiveButton(R.string.block, (dialog, which, selectedItems) -> {
+                                        showProgressIndicator(true);
+                                        ThreadUtils.postOnBackgroundThread(() -> {
+                                            mMainModel.addRules(selectedItems, true);
+                                            ThreadUtils.postOnMainThread(() -> {
+                                                if (!isDetached()) {
+                                                    showProgressIndicator(false);
+                                                }
+                                                displayShortToast(R.string.done);
+                                            });
+                                        });
+                                    })
+                                    .setNeutralButton(R.string.unblock, (dialog, which, selectedItems) -> {
+                                        showProgressIndicator(true);
+                                        ThreadUtils.postOnBackgroundThread(() -> {
+                                            mMainModel.removeRules(selectedItems, true);
+                                            ThreadUtils.postOnMainThread(() -> {
+                                                if (!isDetached()) {
+                                                    showProgressIndicator(false);
+                                                }
+                                                displayShortToast(R.string.done);
+                                            });
+                                        });
+                                    })
+                                    .show();
+                        } else {
+                            new SearchableItemsDialogBuilder<>(v.getContext(), trackerComponentNames)
+                                    .setTitle(R.string.trackers)
+                                    .setNegativeButton(R.string.close, null)
+                                    .show();
+                        }
+                    });
+        }
+        if (tagCloud.isSystemApp) {
+            tagItems.add(new TagItem()
+                    .setTextRes(tagCloud.isSystemlessPath ? R.string.systemless_app : R.string.system_app));
+            if (tagCloud.isUpdatedSystemApp) {
+                tagItems.add(new TagItem().setTextRes(R.string.updated_app));
+            }
+        } else if (!mIsExternalApk) {
+            tagItems.add(new TagItem().setTextRes(R.string.user_app));
+        }
+        if (tagCloud.splitCount > 0) {
+            TagItem splitTag = new TagItem();
+            tagItems.add(splitTag);
+            splitTag.setText(getResources().getQuantityString(R.plurals.no_of_splits, tagCloud.splitCount,
+                            tagCloud.splitCount))
+                    .setOnClickListener(v -> {
+                        ApkFile apkFile = mMainModel.getApkFile();
+                        if (apkFile == null) {
+                            return;
+                        }
+                        // Display a list of apks
+                        List<ApkFile.Entry> apkEntries = apkFile.getEntries();
+                        CharSequence[] entryNames = new CharSequence[tagCloud.splitCount];
+                        for (int i = 0; i < tagCloud.splitCount; ++i) {
+                            entryNames[i] = apkEntries.get(i + 1).toLocalizedString(v.getContext());
+                        }
+                        new SearchableItemsDialogBuilder<>(v.getContext(), entryNames)
+                                .setTitle(R.string.splits)
+                                .setNegativeButton(R.string.close, null)
+                                .show();
+                    });
+        }
+        if (tagCloud.isDebuggable) {
+            tagItems.add(new TagItem().setTextRes(R.string.debuggable));
+        }
+        if (tagCloud.isTestOnly) {
+            tagItems.add(new TagItem().setTextRes(R.string.test_only));
+        }
+        if (!tagCloud.hasCode) {
+            tagItems.add(new TagItem().setTextRes(R.string.no_code));
+        }
+        if (tagCloud.isOverlay) {
+            TagItem overlayTag = new TagItem();
+            tagItems.add(overlayTag);
+            overlayTag.setTextRes(R.string.title_overlay)
+                    .setOnClickListener(v -> {
+                        Context ctx = v.getContext();
+                        String target = Objects.requireNonNull(PackageInfoCompat2.getOverlayTarget(mPackageInfo));
+                        String targetName = PackageInfoCompat2.getTargetOverlayableName(mPackageInfo);
+                        String category = PackageInfoCompat2.getOverlayCategory(mPackageInfo);
+                        int priority = PackageInfoCompat2.getOverlayPriority(mPackageInfo);
+                        boolean isStatic = PackageInfoCompat2.isStaticOverlayPackage(mPackageInfo);
+                        SpannableStringBuilder spannable = new SpannableStringBuilder();
+                        if (targetName != null) {
+                            spannable.append(getStyledKeyValue(ctx, R.string.overlay_target, targetName))
+                                    .append("\n")
+                                    .append(getSmallerText(target));
+                        } else {
+                            spannable.append(getStyledKeyValue(ctx, R.string.overlay_target, target));
+                        }
+                        if (category != null) {
+                            spannable.append("\n")
+                                    .append(getSmallerText(getStyledKeyValue(ctx, R.string.overlay_category, category)));
+                        }
+                        if (!isStatic) {
+                            spannable.append("\n")
+                                    .append(getSmallerText(getStyledKeyValue(ctx, R.string.priority, String.valueOf(priority))));
+                        } // else static overlays have the highest priority
+                        new MaterialAlertDialogBuilder(ctx)
+                                .setTitle(R.string.title_overlay)
+                                .setMessage(spannable)
+                                .setNeutralButton(R.string.app_info, (dialog, which) -> {
+                                    Intent appDetailsIntent = AppDetailsActivity.getIntent(ctx, target, mUserId);
+                                    startActivity(appDetailsIntent);
+                                })
+                                .setNegativeButton(R.string.close, null)
+                                .show();
+                    });
+        }
+        if (tagCloud.hasRequestedLargeHeap) {
+            tagItems.add(new TagItem().setTextRes(R.string.requested_large_heap));
+        }
+        if (tagCloud.hostsToOpen != null) {
+            TagItem openLinksTag = new TagItem();
+            tagItems.add(openLinksTag);
+            openLinksTag.setTextRes(R.string.app_info_tag_open_links)
+                    .setColor(tagCloud.canOpenLinks ? ColorCodes.getFailureColor(context)
+                            : ColorCodes.getSuccessColor(context))
+                    .setOnClickListener(v -> {
+                        SearchableItemsDialogBuilder<String> builder = new SearchableItemsDialogBuilder<>(v.getContext(), new ArrayList<>(tagCloud.hostsToOpen.keySet()))
+                                .setTitle(R.string.title_domains_supported_by_the_app)
+                                .setNegativeButton(R.string.close, null);
+                        if (SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.UPDATE_DOMAIN_VERIFICATION_USER_SELECTION)) {
+                            // Enable/disable directly from the app
+                            builder.setPositiveButton(tagCloud.canOpenLinks ? R.string.disable : R.string.enable,
+                                    (dialog, which) -> ThreadUtils.postOnBackgroundThread(() -> {
+                                        try {
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                                DomainVerificationManagerCompat.setDomainVerificationLinkHandlingAllowed(
+                                                        mPackageName, !tagCloud.canOpenLinks, mUserId);
+                                            }
+                                            mMainModel.getTagsAlteredLiveData().postValue(true);
+                                            ThreadUtils.postOnMainThread(() ->
+                                                    UIUtils.displayShortToast(R.string.done));
+                                        } catch (Throwable th) {
+                                            th.printStackTrace();
+                                            ThreadUtils.postOnMainThread(() -> UIUtils.displayShortToast(R.string.failed));
+                                        }
+                                    }));
+                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            builder.setPositiveButton(R.string.app_settings, (dialog, which) -> {
+                                try {
+                                    startActivity(IntentUtils.getSettings(Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS, mPackageName));
+                                } catch (Throwable th) {
+                                    ExUtils.exceptionAsIgnored(() -> startActivity(IntentUtils.getAppDetailsSettings(mPackageName)));
+                                }
+                            });
+                        }
+                        builder.show();
+                    });
+        }
+        if (!tagCloud.runningServices.isEmpty()) {
+            TagItem runningTag = new TagItem();
+            tagItems.add(runningTag);
+            runningTag.setTextRes(R.string.running)
+                    .setColor(ColorCodes.getComponentRunningIndicatorColor(context))
+                    .setOnClickListener(v ->
+                            displayRunningServices(tagCloud.runningServices, v.getContext()));
+        } else if (tagCloud.isRunning) {
+            TagItem runningTag = new TagItem();
+            tagItems.add(runningTag);
+            runningTag.setTextRes(R.string.running)
+                    .setColor(ColorCodes.getComponentRunningIndicatorColor(context));
+        }
+        if (tagCloud.isForceStopped) {
+            tagItems.add(new TagItem()
+                    .setTextRes(R.string.stopped)
+                    .setColor(ColorCodes.getAppForceStoppedIndicatorColor(context)));
+        }
+        if (!tagCloud.isAppEnabled) {
+            tagItems.add(new TagItem()
+                    .setTextRes(R.string.disabled_app)
+                    .setColor(ColorCodes.getAppDisabledIndicatorColor(context)));
+        }
+        if (tagCloud.isAppSuspended) {
+            tagItems.add(new TagItem()
+                    .setTextRes(R.string.suspended)
+                    .setColor(ColorCodes.getAppSuspendedIndicatorColor(context)));
+        }
+        if (tagCloud.isAppHidden) {
+            tagItems.add(new TagItem()
+                    .setTextRes(R.string.hidden)
+                    .setColor(ColorCodes.getAppHiddenIndicatorColor(context)));
+        }
+        mMagiskHiddenProcesses = tagCloud.magiskHiddenProcesses;
+        if (tagCloud.isMagiskHideEnabled) {
+            tagItems.add(new TagItem()
+                    .setTextRes(R.string.magisk_hide_enabled)
+                    .setOnClickListener(v -> displayMagiskHideDialog()));
+        }
+        mMagiskDeniedProcesses = tagCloud.magiskDeniedProcesses;
+        if (tagCloud.isMagiskDenyListEnabled) {
+            tagItems.add(new TagItem()
+                    .setTextRes(R.string.magisk_denylist)
+                    .setOnClickListener(v -> displayMagiskDenyListDialog()));
+        }
+        if (tagCloud.canWriteAndExecute) {
+            TagItem wxItem = new TagItem();
+            tagItems.add(wxItem);
+            wxItem.setText("WX")
+                    .setColor(ColorCodes.getAppWriteAndExecuteIndicatorColor(context))
+                    .setOnClickListener(v ->
+                            new ScrollableDialogBuilder(v.getContext())
+                                    .setTitle("WX")
+                                    .setMessage(R.string.app_can_write_and_execute_in_same_place)
+                                    .enableAnchors()
+                                    .setNegativeButton(R.string.close, null)
+                                    .show());
+        }
+        if (tagCloud.bloatwareRemovalType != 0) {
+            TagItem bloatwareTag = new TagItem();
+            tagItems.add(bloatwareTag);
+            bloatwareTag.setText("Bloatware")
+                    .setColor(ColorCodes.getBloatwareIndicatorColor(context, tagCloud.bloatwareRemovalType))
+                    .setOnClickListener(v -> {
+                        BloatwareDetailsDialog dialog = BloatwareDetailsDialog.getInstance(mPackageName);
+                        dialog.show(getChildFragmentManager(), BloatwareDetailsDialog.TAG);
+                    });
+        }
+        if (tagCloud.hasKeyStoreItems) {
+            TagItem keyStoreTag = new TagItem();
+            tagItems.add(keyStoreTag);
+            keyStoreTag.setTextRes(R.string.keystore)
+                    .setOnClickListener(view -> new SearchableItemsDialogBuilder<>(view.getContext(), KeyStoreUtils
+                            .getKeyStoreFiles(mApplicationInfo.uid, mUserId))
+                            .setTitle(R.string.keystore)
+                            .setNegativeButton(R.string.close, null)
+                            .show());
+            if (tagCloud.hasMasterKeyInKeyStore) {
+                keyStoreTag.setColor(ColorCodes.getAppKeystoreIndicatorColor(context));
+            }
+        }
+        if (!tagCloud.backups.isEmpty()) {
+            TagItem backupTag = new TagItem();
+            tagItems.add(backupTag);
+            backupTag.setTextRes(R.string.backup)
+                    .setOnClickListener(v -> {
+                        BackupRestoreDialogFragment fragment = BackupRestoreDialogFragment.getInstance(
+                                Collections.singletonList(new UserPackagePair(mPackageName, mUserId)),
+                                BackupRestoreDialogFragment.MODE_RESTORE | BackupRestoreDialogFragment.MODE_DELETE);
+                        fragment.setOnActionBeginListener(mode -> showProgressIndicator(true));
+                        fragment.setOnActionCompleteListener((mode, failedPackages) -> showProgressIndicator(false));
+                        fragment.show(getParentFragmentManager(), BackupRestoreDialogFragment.TAG);
+                    });
+        }
+        if (!tagCloud.isBatteryOptimized) {
+            TagItem batteryOptTag = new TagItem();
+            tagItems.add(batteryOptTag);
+            batteryOptTag.setTextRes(R.string.no_battery_optimization)
+                    .setColor(ColorCodes.getAppNoBatteryOptimizationIndicatorColor(context));
+            if (SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.DEVICE_POWER)) {
+                batteryOptTag.setOnClickListener(v -> new MaterialAlertDialogBuilder(v.getContext())
+                        .setTitle(R.string.battery_optimization)
+                        .setMessage(R.string.enable_battery_optimization)
+                        .setNegativeButton(R.string.no, null)
+                        .setPositiveButton(R.string.yes, (dialog, which) -> {
+                            if (DeviceIdleManagerCompat.enableBatteryOptimization(mPackageName)) {
+                                UIUtils.displayShortToast(R.string.done);
+                                mMainModel.getTagsAlteredLiveData().setValue(true);
+                            } else {
+                                UIUtils.displayShortToast(R.string.failed);
+                            }
+                        })
+                        .show());
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                batteryOptTag.setOnClickListener(v -> ExUtils.exceptionAsIgnored(() ->
+                        startActivity(IntentUtils.getBatteryOptSettings(mPackageName))));
+            }
+        }
+        if (!tagCloud.sensorsEnabled) {
+            TagItem sensorsTag = new TagItem();
+            tagItems.add(sensorsTag);
+            sensorsTag.setTextRes(R.string.tag_sensors_disabled);
+        }
+        if (tagCloud.netPolicies > 0) {
+            String[] readablePolicies = NetworkPolicyManagerCompat.getReadablePolicies(context, tagCloud.netPolicies)
+                    .values().toArray(new String[0]);
+            TagItem netPolicyTag = new TagItem();
+            tagItems.add(netPolicyTag);
+            netPolicyTag.setTextRes(R.string.has_net_policy)
+                    .setOnClickListener(v -> new SearchableItemsDialogBuilder<>(v.getContext(), readablePolicies)
+                            .setTitle(R.string.net_policy)
+                            .setNegativeButton(R.string.ok, null)
+                            .show());
+        }
+        if (tagCloud.ssaid != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            TagItem ssaidTag = new TagItem();
+            tagItems.add(ssaidTag);
+            ssaidTag.setTextRes(R.string.ssaid)
+                    .setColor(ColorCodes.getAppSsaidIndicatorColor(context))
+                    .setOnClickListener(v -> {
+                        ChangeSsaidDialog changeSsaidDialog = ChangeSsaidDialog.getInstance(mPackageName, mApplicationInfo.uid,
+                                tagCloud.ssaid);
+                        changeSsaidDialog.setSsaidChangedInterface((newSsaid, isSuccessful) -> {
+                            displayLongToast(isSuccessful ? R.string.restart_to_reflect_changes : R.string.failed_to_change_ssaid);
+                            if (isSuccessful) tagCloud.ssaid = newSsaid;
+                        });
+                        changeSsaidDialog.show(getChildFragmentManager(), ChangeSsaidDialog.TAG);
+                    });
+        }
+        if (tagCloud.uriGrants != null) {
+            TagItem safTag = new TagItem();
+            tagItems.add(safTag);
+            safTag.setTextRes(R.string.saf)
+                    .setOnClickListener(v -> {
+                        CharSequence[] uriGrants = new CharSequence[tagCloud.uriGrants.size()];
+                        for (int i = 0; i < tagCloud.uriGrants.size(); ++i) {
+                            uriGrants[i] = GrantUriUtils.toLocalisedString(v.getContext(), tagCloud.uriGrants.get(i).uri);
+                        }
+                        new SearchableItemsDialogBuilder<>(v.getContext(), uriGrants)
+                                .setTitle(R.string.saf)
+                                .setTextSelectable(true)
+                                .setListBackgroundColorOdd(ColorCodes.getListItemColor0(mActivity))
+                                .setListBackgroundColorEven(ColorCodes.getListItemColor1(mActivity))
+                                .setNegativeButton(R.string.close, null)
+                                .show();
+                    });
+        }
+        if (tagCloud.usesPlayAppSigning) {
+            TagItem playAppSigningTag = new TagItem();
+            tagItems.add(playAppSigningTag);
+            playAppSigningTag.setTextRes(R.string.uses_play_app_signing)
+                    .setColor(ColorCodes.getAppPlayAppSigningIndicatorColor(context))
+                    .setOnClickListener(v ->
+                            new ScrollableDialogBuilder(mActivity)
+                                    .setTitle(R.string.uses_play_app_signing)
+                                    .setMessage(R.string.uses_play_app_signing_description)
+                                    .setNegativeButton(R.string.close, null)
+                                    .show());
+        }
+        if (tagCloud.xposedModuleInfo != null) {
+            TagItem xposedItem = new TagItem();
+            tagItems.add(xposedItem);
+            xposedItem.setText("Xposed")
+                    .setOnClickListener(v -> new ScrollableDialogBuilder(v.getContext())
+                            .setTitle(R.string.xposed_module_info)
+                            .setMessage(tagCloud.xposedModuleInfo.toLocalizedString(v.getContext()))
+                            .setNegativeButton(R.string.close, null)
+                            .show());
+        }
+        if (tagCloud.staticSharedLibraryNames != null) {
+            TagItem staticSharedLibraryTag = new TagItem();
+            tagItems.add(staticSharedLibraryTag);
+            staticSharedLibraryTag.setTextRes(R.string.static_shared_library)
+                    .setOnClickListener(v -> new SearchableMultiChoiceDialogBuilder<>(v.getContext(), tagCloud.staticSharedLibraryNames, tagCloud.staticSharedLibraryNames)
+                            .setTitle(R.string.shared_libs)
+                            .setPositiveButton(R.string.close, null)
+                            .setNeutralButton(R.string.uninstall, (dialog, which, selectedItems) -> {
+                                int userId = mUserId;
+                                final boolean isSystemApp = ApplicationInfoCompat.isSystemApp(mApplicationInfo);
+                                new ScrollableDialogBuilder(mActivity,
+                                        isSystemApp ? R.string.uninstall_system_app_message : R.string.uninstall_app_message)
+                                        .setTitle(mAppLabel)
+                                        .setPositiveButton(R.string.uninstall, (dialog1, which1, keepData) -> {
+                                            if (selectedItems.size() == 1) {
+                                                ThreadUtils.postOnBackgroundThread(() -> {
+                                                    PackageInstallerCompat installer = PackageInstallerCompat.getNewInstance();
+                                                    installer.setAppLabel(mAppLabel);
+                                                    boolean uninstalled = installer.uninstall(selectedItems.get(0), userId, false);
+                                                    ThreadUtils.postOnMainThread(() -> {
+                                                        if (uninstalled) {
+                                                            displayLongToast(R.string.uninstalled_successfully, mAppLabel);
+                                                            mActivity.finish();
+                                                        } else {
+                                                            displayLongToast(R.string.failed_to_uninstall, mAppLabel);
+                                                        }
+                                                    });
+                                                });
+                                            } else {
+                                                ArrayList<Integer> userIds = new ArrayList<>(selectedItems.size());
+                                                for (int i = 0; i < selectedItems.size(); ++i) {
+                                                    userIds.add(userId);
+                                                }
+                                                BatchQueueItem item = BatchQueueItem.getBatchOpQueue(
+                                                        BatchOpsManager.OP_UNINSTALL, selectedItems, userIds, null);
+                                                Intent intent = BatchOpsService.getServiceIntent(mActivity, item);
+                                                ContextCompat.startForegroundService(mActivity, intent);
+                                            }
+                                        })
+                                        .setNegativeButton(R.string.cancel, (dialog1, which1, keepData) -> {
+                                            if (dialog != null) dialog.cancel();
+                                        })
+                                        .show();
+                            })
+                            .show());
+        }
+        return tagItems;
+    }
+
+    private void displayRunningServices(
+            @NonNull List<ActivityManager.RunningServiceInfo> runningServices,
+            @NonNull Context ctx) {
+        showProgressIndicator(true);
+        ThreadUtils.postOnBackgroundThread(() -> {
+            CharSequence[] runningServiceNames = new CharSequence[runningServices.size()];
+            for (int i = 0; i < runningServiceNames.length; ++i) {
+                ActivityManager.RunningServiceInfo serviceInfo = runningServices.get(i);
+                String title = serviceInfo.service.getShortClassName();
+                Spannable description = new SpannableStringBuilder()
+                        .append(getStyledKeyValue(ctx, R.string.process_name, serviceInfo.process))
+                        .append("\n")
+                        .append(getStyledKeyValue(ctx, R.string.pid, String.valueOf(serviceInfo.pid)));
+                runningServiceNames[i] = new SpannableStringBuilder()
+                        .append(title)
+                        .append("\n")
+                        .append(getSmallerText(description));
+            }
+            boolean logViewerAvailable = FeatureController.isLogViewerEnabled()
+                    && SelfPermissions.checkSelfOrRemotePermission(Manifest.permission.DUMP);
+            DialogTitleBuilder titleBuilder = new DialogTitleBuilder(ctx)
+                    .setTitle(R.string.running_services);
+            if (logViewerAvailable) {
+                titleBuilder.setSubtitle(R.string.running_services_logcat_hint);
+            }
+            ThreadUtils.postOnMainThread(() -> {
+                if (isDetached()) return;
+                showProgressIndicator(false);
+                SearchableItemsDialogBuilder<CharSequence> builder = new SearchableItemsDialogBuilder<>(mActivity, runningServiceNames)
+                        .setTitle(titleBuilder.build());
+                if (logViewerAvailable) {
+                    builder.setOnItemClickListener((dialog, which, item) -> {
+                        Intent logViewerIntent = new Intent(mActivity.getApplicationContext(), LogViewerActivity.class)
+                                .putExtra(LogViewerActivity.EXTRA_FILTER, SearchCriteria.PID_KEYWORD + runningServices.get(which).pid)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        mActivity.startActivity(logViewerIntent);
+                    });
+                }
+                if (SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.FORCE_STOP_PACKAGES)) {
+                    builder.setNeutralButton(R.string.force_stop, (dialog, which) -> ThreadUtils.postOnBackgroundThread(() -> {
+                        try {
+                            PackageManagerCompat.forceStopPackage(mPackageName, mUserId);
+                        } catch (SecurityException e) {
+                            Log.e(TAG, e);
+                            ThreadUtils.postOnMainThread(() -> displayLongToast(R.string.failed_to_stop, mAppLabel));
+                        }
+                    }));
+                }
+                builder.setNegativeButton(R.string.close, null);
+                if (isDetached()) return;
+                builder.show();
+            });
+        });
     }
 
     @UiThread
-    private void setupTagCloud() {
-        model.getTagCloud().observe(getViewLifecycleOwner(), tagCloud -> {
-            mTagCloud.removeAllViews();
-            if (mainModel == null) return;
-            // Add tracker chip
-            if (!tagCloud.trackerComponents.isEmpty()) {
-                CharSequence[] trackerComponentNames = new CharSequence[tagCloud.trackerComponents.size()];
-                for (int i = 0; i < trackerComponentNames.length; ++i) {
-                    trackerComponentNames[i] = tagCloud.trackerComponents.get(i).name;
-                }
-                addChip(getResources().getQuantityString(R.plurals.no_of_trackers, tagCloud.trackerComponents.size(),
-                        tagCloud.trackerComponents.size()), R.color.tracker).setOnClickListener(v -> {
-                    if (!isExternalApk && isRootEnabled) {
-                        new SearchableMultiChoiceDialogBuilder<>(mActivity, tagCloud.trackerComponents, trackerComponentNames)
-                                .setTitle(R.string.trackers)
-                                .setSelections(tagCloud.trackerComponents)
-                                .setNegativeButton(R.string.cancel, null)
-                                .setPositiveButton(R.string.block, (dialog, which, selectedItems) -> {
-                                    showProgressIndicator(true);
-                                    executor.submit(() -> {
-                                        mainModel.addRules(selectedItems, true);
-                                        runOnUiThread(() -> {
-                                            if (isDetached()) return;
-                                            showProgressIndicator(false);
-                                            displayShortToast(R.string.done);
-                                        });
-                                    });
-                                })
-                                .setNeutralButton(R.string.unblock, (dialog, which, selectedItems) -> {
-                                    showProgressIndicator(true);
-                                    executor.submit(() -> {
-                                        mainModel.removeRules(selectedItems, true);
-                                        runOnUiThread(() -> {
-                                            if (isDetached()) return;
-                                            showProgressIndicator(false);
-                                            displayShortToast(R.string.done);
-                                        });
-                                    });
-                                })
-                                .show();
-                    } else {
-                        new MaterialAlertDialogBuilder(mActivity)
-                                .setTitle(R.string.trackers)
-                                .setItems(trackerComponentNames, null)
-                                .setNegativeButton(R.string.close, null)
-                                .show();
-                    }
-                });
-            }
-            if (tagCloud.isSystemApp) {
-                if (tagCloud.isSystemlessPath) {
-                    addChip(R.string.systemless_app);
-                } else addChip(R.string.system_app);
-                if (tagCloud.isUpdatedSystemApp) {
-                    addChip(R.string.updated_app);
-                }
-            } else if (!mainModel.getIsExternalApk()) addChip(R.string.user_app);
-            if (tagCloud.splitCount > 0) {
-                addChip(getResources().getQuantityString(R.plurals.no_of_splits, tagCloud.splitCount,
-                        tagCloud.splitCount)).setOnClickListener(v -> {
-                    ApkFile apkFile = ApkFile.getInstance(mainModel.getApkFileKey());
-                    // Display a list of apks
-                    List<ApkFile.Entry> apkEntries = apkFile.getEntries();
-                    CharSequence[] entryNames = new CharSequence[tagCloud.splitCount];
-                    for (int i = 0; i < tagCloud.splitCount; ++i) {
-                        entryNames[i] = apkEntries.get(i + 1).toLocalizedString(mActivity);
-                    }
-                    new MaterialAlertDialogBuilder(mActivity)
-                            .setTitle(R.string.splits)
-                            .setItems(entryNames, null)
-                            .setNegativeButton(R.string.close, null)
-                            .show();
-                });
-            }
-            if (tagCloud.isDebuggable) {
-                addChip(R.string.debuggable);
-            }
-            if (tagCloud.isTestOnly) {
-                addChip(R.string.test_only);
-            }
-            if (!tagCloud.hasCode) {
-                addChip(R.string.no_code);
-            }
-            if (tagCloud.hasRequestedLargeHeap) {
-                addChip(R.string.requested_large_heap, R.color.tracker);
-            }
-            if (tagCloud.runningServices.size() > 0) {
-                addChip(R.string.running, R.color.running).setOnClickListener(v -> {
-                    mProgressIndicator.show();
-                    executor.submit(() -> {
-                        int pid = FeatureController.isLogViewerEnabled() ? PackageUtils.getPidForPackage(mPackageName,
-                                mApplicationInfo.uid) : 0;
-                        CharSequence[] runningServices = new CharSequence[tagCloud.runningServices.size()];
-                        for (int i = 0; i < runningServices.length; ++i) {
-                            runningServices[i] = tagCloud.runningServices.get(i).getClassName();
+    private void displayMagiskHideDialog() {
+        SearchableMultiChoiceDialogBuilder<MagiskProcess> builder;
+        builder = getMagiskProcessDialog(mMagiskHiddenProcesses, (dialog, which, mp, isChecked) ->
+                ThreadUtils.postOnBackgroundThread(() -> {
+                    mp.setEnabled(isChecked);
+                    if (MagiskHide.apply(mp, true)) {
+                        try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(mPackageName, mUserId)) {
+                            cb.setMagiskHide(mp);
+                            mMainModel.getTagsAlteredLiveData().postValue(true);
                         }
-                        runOnUiThread(() -> {
-                            mProgressIndicator.hide();
-                            MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(mActivity)
-                                    .setTitle(R.string.running_services)
-                                    .setItems(runningServices, null)
-                                    .setPositiveButton(R.string.force_stop, (dialog, which) -> executor.submit(() -> {
-                                        try {
-                                            PackageManagerCompat.forceStopPackage(mPackageName, mainModel.getUserHandle());
-                                            runOnUiThread(this::refreshDetails);
-                                        } catch (RemoteException | SecurityException e) {
-                                            Log.e(TAG, e);
-                                            displayLongToast(R.string.failed_to_stop, mPackageLabel);
-                                        }
-                                    }))
-                                    .setNegativeButton(R.string.close, null);
-                            if (pid != 0) {
-                                builder.setNeutralButton(R.string.view_logs, (dialog, which) -> {
-                                    Intent logViewerIntent = new Intent(mActivity.getApplicationContext(), LogViewerActivity.class)
-                                            .setAction(LogViewerActivity.ACTION_LAUNCH)
-                                            .putExtra(LogViewerActivity.EXTRA_FILTER, SearchCriteria.PID_KEYWORD + pid)
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                    mActivity.startActivity(logViewerIntent);
-                                });
-                            }
-                            builder.show();
-                        });
-                    });
+                    } else {
+                        mp.setEnabled(!isChecked);
+                        ThreadUtils.postOnMainThread(() -> displayLongToast(isChecked ? R.string.failed_to_enable_magisk_hide
+                                : R.string.failed_to_disable_magisk_hide));
+                    }
+                }));
+        if (builder != null) {
+            builder.setTitle(R.string.magisk_hide_enabled).show();
+        }
+    }
+
+    @UiThread
+    private void displayMagiskDenyListDialog() {
+        SearchableMultiChoiceDialogBuilder<MagiskProcess> builder;
+        builder = getMagiskProcessDialog(mMagiskDeniedProcesses, (dialog, which, mp, isChecked) ->
+                ThreadUtils.postOnBackgroundThread(() -> {
+                    mp.setEnabled(isChecked);
+                    if (MagiskDenyList.apply(mp, true)) {
+                        try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(mPackageName, mUserId)) {
+                            cb.setMagiskDenyList(mp);
+                            mMainModel.getTagsAlteredLiveData().postValue(true);
+                        }
+                    } else {
+                        mp.setEnabled(!isChecked);
+                        ThreadUtils.postOnMainThread(() -> displayLongToast(isChecked
+                                ? R.string.failed_to_enable_magisk_deny_list
+                                : R.string.failed_to_disable_magisk_deny_list));
+                    }
+                }));
+        if (builder != null) {
+            builder.setTitle(R.string.magisk_denylist).show();
+        }
+    }
+
+    @Nullable
+    public SearchableMultiChoiceDialogBuilder<MagiskProcess> getMagiskProcessDialog(
+            @Nullable List<MagiskProcess> magiskProcesses,
+            SearchableMultiChoiceDialogBuilder.OnMultiChoiceClickListener<MagiskProcess> multiChoiceClickListener) {
+        if (magiskProcesses == null || magiskProcesses.isEmpty()) {
+            return null;
+        }
+        List<Integer> selectedIndexes = new ArrayList<>();
+        CharSequence[] processes = new CharSequence[magiskProcesses.size()];
+        int i = 0;
+        for (MagiskProcess mp : magiskProcesses) {
+            SpannableStringBuilder sb = new SpannableStringBuilder();
+            if (mp.isIsolatedProcess()) {
+                sb.append("\n").append(UIUtils.getSecondaryText(mActivity, getString(R.string.isolated)));
+                if (mp.isRunning()) {
+                    sb.append(", ").append(UIUtils.getSecondaryText(mActivity, getString(R.string.running)));
+                }
+            } else if (mp.isRunning()) {
+                sb.append("\n").append(UIUtils.getSecondaryText(mActivity, getString(R.string.running)));
+            }
+            processes[i] = new SpannableStringBuilder(mp.name).append(UIUtils.getSmallerText(sb));
+            if (mp.isEnabled()) {
+                selectedIndexes.add(i);
+            }
+            i++;
+        }
+        return new SearchableMultiChoiceDialogBuilder<>(mActivity, magiskProcesses, processes)
+                .addSelections(ArrayUtils.convertToIntArray(selectedIndexes))
+                .setTextSelectable(true)
+                .setOnMultiChoiceClickListener(multiChoiceClickListener)
+                .setNegativeButton(R.string.close, null);
+    }
+
+    @MainThread
+    private void setupHorizontalActions() {
+        if (mActionsFuture != null) {
+            mActionsFuture.cancel(true);
+        }
+        mActionsFuture = ThreadUtils.postOnBackgroundThread(() -> {
+            List<ActionItem> actionItems = getHorizontalActions();
+            ThreadUtils.postOnMainThread(() -> {
+                if (isDetached()) return;
+                ++mLoadedItemCount;
+                if (mLoadedItemCount >= 4) {
+                    showProgressIndicator(false);
+                }
+                mHorizontalLayout.removeAllViews();
+                for (ActionItem actionItem : actionItems) {
+                    if (isDetached()) return;
+                    mHorizontalLayout.addView(actionItem.toActionButton(mHorizontalLayout.getContext(), mHorizontalLayout));
+                }
+                if (isDetached()) return;
+                View v = mHorizontalLayout.getChildAt(0);
+                if (v != null) v.requestFocus();
+            });
+        });
+    }
+
+    @WorkerThread
+    private List<ActionItem> getHorizontalActions() {
+        Objects.requireNonNull(mMainModel);
+        List<ActionItem> actionItems = new LinkedList<>();
+        if (!mIsExternalApk) {
+            boolean isStaticSharedLib = ApplicationInfoCompat.isStaticSharedLibrary(mApplicationInfo);
+            boolean isFrozen = FreezeUtils.isFrozen(mApplicationInfo);
+            boolean canFreeze = !isStaticSharedLib && SelfPermissions.canFreezeUnfreezePackages();
+            // Set open
+            Intent launchIntent = PackageManagerCompat.getLaunchIntentForPackage(mPackageName, mUserId);
+            if (launchIntent != null && !isFrozen) {
+                ActionItem launchAction = new ActionItem(R.string.launch_app, R.drawable.ic_open_in_new);
+                actionItems.add(launchAction);
+                launchAction.setOnClickListener(v -> {
+                    try {
+                        ActivityManagerCompat.startActivity(launchIntent, mUserId);
+                    } catch (Throwable th) {
+                        UIUtils.displayLongToast("Error: " + th.getLocalizedMessage());
+                    }
                 });
             }
-            if (tagCloud.isForceStopped) {
-                addChip(R.string.stopped, R.color.stopped);
+            // Set freeze/unfreeze
+            if (canFreeze && !isFrozen) {
+                ActionItem freezeAction = new ActionItem(R.string.freeze, R.drawable.ic_snowflake);
+                actionItems.add(freezeAction);
+                freezeAction.setOnClickListener(v -> {
+                            if (BuildConfig.APPLICATION_ID.equals(mPackageName)) {
+                                new MaterialAlertDialogBuilder(mActivity)
+                                        .setMessage(R.string.are_you_sure)
+                                        .setPositiveButton(R.string.yes, (d, w) -> freeze(true))
+                                        .setNegativeButton(R.string.no, null)
+                                        .show();
+                            } else freeze(true);
+                        })
+                        .setOnLongClickListener(v -> {
+                            createFreezeShortcut(false);
+                            return true;
+                        });
             }
-            if (!tagCloud.isAppEnabled) {
-                addChip(R.string.disabled_app, R.color.disabled_user);
-            }
-            if (tagCloud.isAppSuspended) {
-                addChip(R.string.suspended, R.color.stopped);
-            }
-            if (tagCloud.isAppHidden) {
-                addChip(R.string.hidden, R.color.disabled_user);
-            }
-            if (tagCloud.isMagiskHideEnabled) {
-                addChip(R.string.magisk_hide_enabled).setOnClickListener(v -> new MaterialAlertDialogBuilder(mActivity)
-                        .setTitle(R.string.magisk_hide_enabled)
-                        .setMessage(R.string.disable_magisk_hide)
-                        .setPositiveButton(R.string.disable, (dialog, which) -> {
-                            if (MagiskUtils.unhide(mPackageName)) {
-                                try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(mPackageName, mainModel.getUserHandle())) {
-                                    cb.setMagiskHide(false);
-                                    refreshDetails();
+            // Set uninstall
+            ActionItem uninstallAction = new ActionItem(R.string.uninstall, R.drawable.ic_trash_can);
+            actionItems.add(uninstallAction);
+            uninstallAction.setOnClickListener(v -> {
+                if (mUserId != UserHandleHidden.myUserId() && !SelfPermissions.checkSelfOrRemotePermission(Manifest.permission.DELETE_PACKAGES)) {
+                    // Could be for work profile
+                    try {
+                        Intent uninstallIntent = new Intent(Intent.ACTION_DELETE);
+                        uninstallIntent.setData(Uri.parse("package:" + mPackageName));
+                        ActivityManagerCompat.startActivity(uninstallIntent, mUserId);
+                        // TODO: 19/8/24 Watch for uninstallation
+                    } catch (Throwable th) {
+                        UIUtils.displayLongToast("Error: " + th.getLocalizedMessage());
+                    }
+                    return;
+                }
+                final boolean isSystemApp = (mApplicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+                ScrollableDialogBuilder builder = new ScrollableDialogBuilder(mActivity,
+                        isSystemApp ? R.string.uninstall_system_app_message : R.string.uninstall_app_message)
+                        .setTitle(mAppLabel)
+                        // FIXME: 16/6/23 Does it even work without INSTALL_PACKAGES?
+                        .setCheckboxLabel(R.string.keep_data_and_app_signing_signatures)
+                        .setPositiveButton(R.string.uninstall, (dialog, which, keepData) -> ThreadUtils.postOnBackgroundThread(() -> {
+                            PackageInstallerCompat installer = PackageInstallerCompat.getNewInstance();
+                            installer.setAppLabel(mAppLabel);
+                            boolean uninstalled = installer.uninstall(mPackageName, mUserId, keepData);
+                            ThreadUtils.postOnMainThread(() -> {
+                                if (uninstalled) {
+                                    displayLongToast(R.string.uninstalled_successfully, mAppLabel);
+                                    mActivity.finish();
+                                } else {
+                                    displayLongToast(R.string.failed_to_uninstall, mAppLabel);
                                 }
+                            });
+                        }))
+                        .setNegativeButton(R.string.cancel, (dialog, which, keepData) -> {
+                            if (dialog != null) dialog.cancel();
+                        });
+                if ((mApplicationInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0) {
+                    builder.setNeutralButton(R.string.uninstall_updates, (dialog, which, keepData) ->
+                            ThreadUtils.postOnBackgroundThread(() -> {
+                                PackageInstallerCompat installer = PackageInstallerCompat.getNewInstance();
+                                installer.setAppLabel(mAppLabel);
+                                boolean isSuccessful = installer.uninstall(mPackageName, UserHandleHidden.USER_ALL, keepData);
+                                if (isSuccessful) {
+                                    ThreadUtils.postOnMainThread(() -> displayLongToast(R.string.update_uninstalled_successfully, mAppLabel));
+                                } else {
+                                    ThreadUtils.postOnMainThread(() -> displayLongToast(R.string.failed_to_uninstall_updates, mAppLabel));
+                                }
+                            }));
+                }
+                builder.show();
+            });
+            // Enable/disable app (root/ADB only)
+            if (canFreeze && isFrozen) {
+                // Enable app
+                ActionItem unfreezeAction = new ActionItem(R.string.unfreeze, R.drawable.ic_snowflake_off);
+                actionItems.add(unfreezeAction);
+                unfreezeAction.setOnClickListener(v -> freeze(false))
+                        .setOnLongClickListener(v -> {
+                            createFreezeShortcut(true);
+                            return true;
+                        });
+            }
+            boolean accessibilityServiceRunning = UserHandleHidden.myUserId() == mUserId && ServiceHelper
+                    .checkIfServiceIsRunning(mActivity, NoRootAccessibilityService.class);
+            if (!isStaticSharedLib && (SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.FORCE_STOP_PACKAGES)
+                    || accessibilityServiceRunning)) {
+                // Force stop
+                if (!ApplicationInfoCompat.isStopped(mApplicationInfo) &&
+                        (SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.FORCE_STOP_PACKAGES)
+                                || accessibilityServiceRunning)) {
+                    ActionItem forceStopAction = new ActionItem(R.string.force_stop, R.drawable.ic_power_settings);
+                    actionItems.add(forceStopAction);
+                    forceStopAction.setOnClickListener(v -> {
+                        if (SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.FORCE_STOP_PACKAGES)) {
+                            ThreadUtils.postOnBackgroundThread(() -> {
+                                try {
+                                    PackageManagerCompat.forceStopPackage(mPackageName, mUserId);
+                                } catch (SecurityException e) {
+                                    Log.e(TAG, e);
+                                    displayLongToast(R.string.failed_to_stop, mAppLabel);
+                                }
+                            });
+                        } else {
+                            // Use accessibility
+                            AccessibilityMultiplexer.getInstance().enableForceStop(true);
+                            mActivityLauncher.launch(IntentUtils.getAppDetailsSettings(mPackageName),
+                                    result -> {
+                                        AccessibilityMultiplexer.getInstance().enableForceStop(false);
+                                        refreshDetails();
+                                    });
+                        }
+                    });
+                }
+            }
+            if (!isStaticSharedLib && (SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.CLEAR_APP_USER_DATA)
+                    || accessibilityServiceRunning)) {
+                // Clear data
+                ActionItem clearDataAction = new ActionItem(R.string.clear_data, R.drawable.ic_clear_data);
+                actionItems.add(clearDataAction);
+                clearDataAction.setOnClickListener(v -> new MaterialAlertDialogBuilder(mActivity)
+                        .setTitle(mAppLabel)
+                        .setMessage(R.string.clear_data_message)
+                        .setPositiveButton(R.string.clear, (dialog, which) -> {
+                            if (SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.CLEAR_APP_USER_DATA)) {
+                                ThreadUtils.postOnBackgroundThread(() -> {
+                                    boolean success = PackageManagerCompat
+                                            .clearApplicationUserData(mPackageName, mUserId);
+                                    ThreadUtils.postOnMainThread(() -> {
+                                        if (success) {
+                                            UIUtils.displayShortToast(R.string.done);
+                                        } else UIUtils.displayShortToast(R.string.failed);
+                                    });
+                                });
                             } else {
-                                displayLongToast(R.string.failed_to_disable_magisk_hide);
+                                // Use accessibility
+                                AccessibilityMultiplexer.getInstance().enableNavigateToStorageAndCache(true);
+                                AccessibilityMultiplexer.getInstance().enableClearData(true);
+                                mActivityLauncher.launch(IntentUtils.getAppDetailsSettings(mPackageName),
+                                        result -> {
+                                            AccessibilityMultiplexer.getInstance().enableNavigateToStorageAndCache(true);
+                                            AccessibilityMultiplexer.getInstance().enableClearData(false);
+                                            refreshDetails();
+                                        });
                             }
                         })
                         .setNegativeButton(R.string.cancel, null)
                         .show());
             }
-            if (tagCloud.hasKeyStoreItems) {
-                Chip chip;
-                if (tagCloud.hasMasterKeyInKeyStore) {
-                    chip = addChip(R.string.keystore, R.color.tracker);
-                } else chip = addChip(R.string.keystore);
-                chip.setOnClickListener(view -> new MaterialAlertDialogBuilder(mActivity)
-                        .setTitle(R.string.keystore)
-                        .setItems(KeyStoreUtils.getKeyStoreFiles(mApplicationInfo.uid,
-                                mainModel.getUserHandle()).toArray(new String[0]), null)
-                        .setNegativeButton(R.string.close, null)
-                        .show());
-            }
-            if (tagCloud.backups.length > 0) {
-                CharSequence[] backupNames = new CharSequence[tagCloud.backups.length];
-                for (int i = 0; i < tagCloud.backups.length; ++i) {
-                    backupNames[i] = tagCloud.backups[i].toLocalizedString(mActivity);
-                }
-                addChip(R.string.backup).setOnClickListener(v -> new MaterialAlertDialogBuilder(mActivity)
-                        .setTitle(R.string.backup)
-                        .setItems(backupNames, null)
-                        .setNegativeButton(R.string.close, null)
-                        .show());
-            }
-            if (isDetached()) return;
-            if (!tagCloud.isBatteryOptimized) {
-                addChip(R.string.no_battery_optimization, R.color.red_orange).setOnClickListener(v -> new MaterialAlertDialogBuilder(mActivity)
-                        .setTitle(R.string.battery_optimization)
-                        .setMessage(R.string.enable_battery_optimization)
-                        .setNegativeButton(R.string.no, null)
-                        .setPositiveButton(R.string.yes, (dialog, which) -> {
-                            Runner.runCommand(new String[]{"dumpsys", "deviceidle", "whitelist", "-" + mPackageName});
-                            refreshDetails();
-                        })
-                        .show());
-            }
-            if (tagCloud.netPolicies > 0) {
-                String[] readablePolicies = NetworkPolicyManagerCompat.getReadablePolicies(mActivity, tagCloud.netPolicies)
-                        .values().toArray(new String[0]);
-                addChip(R.string.has_net_policy).setOnClickListener(v -> new MaterialAlertDialogBuilder(mActivity)
-                        .setTitle(R.string.net_policy)
-                        .setItems(readablePolicies, null)
-                        .setNegativeButton(R.string.ok, null)
-                        .show());
-            }
-            if (tagCloud.ssaid != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                addChip(R.string.ssaid, R.color.red_orange).setOnClickListener(v -> {
-                    View view = getLayoutInflater().inflate(R.layout.dialog_ssaid_info, null);
-                    AlertDialog alertDialog = new MaterialAlertDialogBuilder(mActivity)
-                            .setTitle(R.string.ssaid)
-                            .setView(view)
-                            .setPositiveButton(R.string.apply, null)
-                            .setNegativeButton(R.string.close, null)
-                            .setNeutralButton(R.string.reset_to_default, null)
-                            .create();
-                    TextInputEditText ssaidHolder = view.findViewById(R.id.ssaid);
-                    TextInputLayout ssaidInputLayout = view.findViewById(android.R.id.text1);
-                    AtomicReference<Button> applyButton = new AtomicReference<>();
-                    AtomicReference<Button> resetButton = new AtomicReference<>();
-                    AtomicReference<String> ssaid = new AtomicReference<>(tagCloud.ssaid);
-
-                    alertDialog.setOnShowListener(dialog -> {
-                        applyButton.set(alertDialog.getButton(AlertDialog.BUTTON_POSITIVE));
-                        resetButton.set(alertDialog.getButton(AlertDialog.BUTTON_NEUTRAL));
-                        applyButton.get().setVisibility(View.GONE);
-                        applyButton.get().setOnClickListener(v2 -> executor.submit(() -> {
-                            try {
-                                SsaidSettings ssaidSettings = new SsaidSettings(mPackageName, mApplicationInfo.uid);
-                                if (ssaidSettings.setSsaid(ssaid.get())) {
-                                    model.loadTagCloud();
-                                    runOnUiThread(() -> displayLongToast(R.string.restart_to_reflect_changes));
-                                } else {
-                                    runOnUiThread(() -> displayLongToast(R.string.failed_to_change_ssaid));
-                                }
-                                alertDialog.dismiss();
-                            } catch (IOException ignore) {
-                            }
-                        }));
-                        resetButton.get().setVisibility(View.GONE);
-                        resetButton.get().setOnClickListener(v2 -> {
-                            ssaid.set(tagCloud.ssaid);
-                            ssaidHolder.setText(ssaid.get());
-                            resetButton.get().setVisibility(View.GONE);
-                            applyButton.get().setVisibility(View.GONE);
-                        });
-                    });
-                    ssaidHolder.setText(tagCloud.ssaid);
-                    ssaidHolder.setTypeface(Typeface.MONOSPACE);
-                    ssaidHolder.setOnClickListener(v2 -> {
-                        ClipboardManager clipboard = (ClipboardManager) mActivity.getSystemService(Context.CLIPBOARD_SERVICE);
-                        ClipData clip = ClipData.newPlainText("SSAID", ssaid.get());
-                        clipboard.setPrimaryClip(clip);
-                        displayShortToast(R.string.copied_to_clipboard);
-                    });
-                    ssaidInputLayout.setEndIconOnClickListener(v2 -> {
-                        ssaid.set(SsaidSettings.generateSsaid(mPackageName));
-                        ssaidHolder.setText(ssaid.get());
-                        if (!tagCloud.ssaid.equals(ssaid.get())) {
-                            if (resetButton.get() != null) {
-                                resetButton.get().setVisibility(View.VISIBLE);
-                            }
-                            if (applyButton.get() != null) {
-                                applyButton.get().setVisibility(View.VISIBLE);
-                            }
-                        }
-                    });
-                    alertDialog.show();
-                });
-            }
-            if (tagCloud.uriGrants != null) {
-                addChip(R.string.saf).setOnClickListener(v -> {
-                    CharSequence[] uriGrants = new CharSequence[tagCloud.uriGrants.size()];
-                    for (int i = 0; i < tagCloud.uriGrants.size(); ++i) {
-                        uriGrants[i] = tagCloud.uriGrants.get(i).uri.toString();
-                    }
-                    new MaterialAlertDialogBuilder(mActivity)
-                            .setTitle(R.string.saf)
-                            .setItems(uriGrants, null)
-                            .setNegativeButton(R.string.close, null)
-                            .show();
-                });
-            }
-        });
-    }
-
-    private void setHorizontalActions() {
-        mHorizontalLayout.removeAllViews();
-        if (mainModel != null && !mainModel.getIsExternalApk()) {
-            // Set open
-            final Intent launchIntentForPackage = mPackageManager.getLaunchIntentForPackage(mPackageName);
-            if (launchIntentForPackage != null) {
-                addToHorizontalLayout(R.string.launch_app, R.drawable.ic_open_in_new_black_24dp)
-                        .setOnClickListener(v -> {
-                            try {
-                                startActivity(launchIntentForPackage);
-                            } catch (Throwable th) {
-                                UIUtils.displayLongToast(th.getLocalizedMessage());
-                            }
-                        });
-            }
-            // Set disable
-            if (isRootEnabled || isAdbEnabled) {
-                if (mApplicationInfo.enabled) {
-                    addToHorizontalLayout(R.string.disable, R.drawable.ic_block_black_24dp).setOnClickListener(v -> {
-                        if (BuildConfig.APPLICATION_ID.equals(mPackageName)) {
-                            new MaterialAlertDialogBuilder(mActivity)
-                                    .setMessage(R.string.are_you_sure)
-                                    .setPositiveButton(R.string.yes, (d, w) -> disable())
-                                    .setNegativeButton(R.string.no, null)
-                                    .show();
-                        } else disable();
-                    });
-                }
-            }
-            // Set uninstall
-            addToHorizontalLayout(R.string.uninstall, R.drawable.ic_delete_black_24dp).setOnClickListener(v -> {
-                final boolean isSystemApp = (mApplicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-                if (AppPref.isRootOrAdbEnabled()) {
-                    ScrollableDialogBuilder builder = new ScrollableDialogBuilder(mActivity,
-                            isSystemApp ? R.string.uninstall_system_app_message : R.string.uninstall_app_message)
-                            .setCheckboxLabel(R.string.keep_data_and_app_signing_signatures)
-                            .setTitle(mPackageLabel)
-                            .setPositiveButton(R.string.uninstall, (dialog, which, keepData) -> executor.submit(() -> {
-                                try {
-                                    PackageInstallerCompat.uninstall(mPackageName, mainModel.getUserHandle(), keepData);
-                                    runOnUiThread(() -> {
-                                        displayLongToast(R.string.uninstalled_successfully, mPackageLabel);
-                                        mActivity.finish();
-                                    });
-                                } catch (Exception e) {
-                                    Log.e(TAG, e);
-                                    runOnUiThread(() -> displayLongToast(R.string.failed_to_uninstall, mPackageLabel));
-                                }
-                            }))
-                            .setNegativeButton(R.string.cancel, (dialog, which, keepData) -> {
-                                if (dialog != null) dialog.cancel();
-                            });
-                    if ((mApplicationInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0) {
-                        builder.setNeutralButton(R.string.uninstall_updates, (dialog, which, keepData) ->
-                                executor.submit(() -> {
-                                    Runner.Result result = RunnerUtils.uninstallPackageUpdate(mPackageName, mainModel.getUserHandle(), keepData);
-                                    if (result.isSuccessful()) {
-                                        runOnUiThread(() -> displayLongToast(R.string.update_uninstalled_successfully, mPackageLabel));
-                                    } else {
-                                        runOnUiThread(() -> displayLongToast(R.string.failed_to_uninstall_updates, mPackageLabel));
-                                    }
-                                }));
-                    }
-                    builder.show();
-                } else {
-                    Intent uninstallIntent = new Intent(Intent.ACTION_DELETE);
-                    uninstallIntent.setData(Uri.parse("package:" + mPackageName));
-                    startActivity(uninstallIntent);
-                }
-            });
-            // Enable/disable app (root only)
-            if (isRootEnabled || isAdbEnabled) {
-                if (!mApplicationInfo.enabled) {
-                    // Enable app
-                    addToHorizontalLayout(R.string.enable, R.drawable.ic_baseline_get_app_24).setOnClickListener(v -> {
-                        try {
-                            PackageManagerCompat.setApplicationEnabledSetting(mPackageName,
-                                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED, 0,
-                                    mainModel.getUserHandle());
-                        } catch (RemoteException | SecurityException e) {
-                            Log.e(TAG, e);
-                            displayLongToast(R.string.failed_to_enable, mPackageLabel);
-                        }
-                    });
-                }
-                // Force stop
-                if ((mApplicationInfo.flags & ApplicationInfo.FLAG_STOPPED) == 0) {
-                    addToHorizontalLayout(R.string.force_stop, R.drawable.ic_baseline_power_settings_new_24)
-                            .setOnClickListener(v -> executor.submit(() -> {
-                                try {
-                                    PackageManagerCompat.forceStopPackage(mPackageName, mainModel.getUserHandle());
-                                    runOnUiThread(this::refreshDetails);
-                                } catch (RemoteException | SecurityException e) {
-                                    Log.e(TAG, e);
-                                    displayLongToast(R.string.failed_to_stop, mPackageLabel);
-                                }
-                            }));
-                }
-                // Clear data
-                addToHorizontalLayout(R.string.clear_data, R.drawable.ic_delete_black_24dp)
-                        .setOnClickListener(v -> new MaterialAlertDialogBuilder(mActivity)
-                                .setTitle(mPackageLabel)
-                                .setMessage(R.string.clear_data_message)
-                                .setPositiveButton(R.string.clear, (dialog, which) ->
-                                        executor.submit(() -> {
-                                            if (PackageManagerCompat.clearApplicationUserData(mPackageName, mainModel.getUserHandle())) {
-                                                runOnUiThread(this::refreshDetails);
-                                            }
-                                        }))
-                                .setNegativeButton(R.string.cancel, null)
-                                .show());
+            if (!isStaticSharedLib && (SelfPermissions.canClearAppCache() || accessibilityServiceRunning)) {
                 // Clear cache
-                addToHorizontalLayout(R.string.clear_cache, R.drawable.ic_delete_black_24dp)
-                        .setOnClickListener(v -> executor.submit(() -> {
-                            if (PackageManagerCompat.deleteApplicationCacheFilesAsUser(mPackageName, mainModel.getUserHandle())) {
-                                runOnUiThread(this::refreshDetails);
-                            }
-                        }));
-            }  // End root only
+                ActionItem clearCacheAction = new ActionItem(R.string.clear_cache, R.drawable.ic_clear_cache);
+                actionItems.add(clearCacheAction);
+                clearCacheAction.setOnClickListener(v -> {
+                    if (SelfPermissions.canClearAppCache()) {
+                        ThreadUtils.postOnBackgroundThread(() -> {
+                            boolean success = PackageManagerCompat
+                                    .deleteApplicationCacheFilesAsUser(mPackageName, mUserId);
+                            ThreadUtils.postOnMainThread(() -> {
+                                if (success) {
+                                    UIUtils.displayShortToast(R.string.done);
+                                } else UIUtils.displayShortToast(R.string.failed);
+                            });
+                        });
+                    } else {
+                        // Use accessibility
+                        AccessibilityMultiplexer.getInstance().enableNavigateToStorageAndCache(true);
+                        AccessibilityMultiplexer.getInstance().enableClearCache(true);
+                        mActivityLauncher.launch(IntentUtils.getAppDetailsSettings(mPackageName),
+                                result -> {
+                                    AccessibilityMultiplexer.getInstance().enableNavigateToStorageAndCache(false);
+                                    AccessibilityMultiplexer.getInstance().enableClearCache(false);
+                                    refreshDetails();
+                                });
+                    }
+                });
+            } else {
+                // Display Android settings button
+                ActionItem settingAction = new ActionItem(R.string.view_in_settings, R.drawable.ic_settings);
+                actionItems.add(settingAction);
+                settingAction.setOnClickListener(v -> {
+                    try {
+                        ActivityManagerCompat.startActivity(IntentUtils.getAppDetailsSettings(mPackageName), mUserId);
+                    } catch (Throwable th) {
+                        UIUtils.displayLongToast("Error: " + th.getLocalizedMessage());
+                    }
+                });
+            }
         } else if (FeatureController.isInstallerEnabled()) {
             if (mInstalledPackageInfo == null) {
                 // App not installed
-                addToHorizontalLayout(R.string.install, R.drawable.ic_baseline_get_app_24)
-                        .setOnClickListener(v -> install());
+                ActionItem installAction = new ActionItem(R.string.install, R.drawable.ic_get_app);
+                actionItems.add(installAction);
+                installAction.setOnClickListener(v -> install());
             } else {
                 // App is installed
                 long installedVersionCode = PackageInfoCompat.getLongVersionCode(mInstalledPackageInfo);
                 long thisVersionCode = PackageInfoCompat.getLongVersionCode(mPackageInfo);
                 if (installedVersionCode < thisVersionCode) {
                     // Needs update
-                    addToHorizontalLayout(R.string.whats_new, R.drawable.ic_info_outline_black_24dp)
-                            .setOnClickListener(v -> {
-                                Bundle args = new Bundle();
-                                args.putParcelable(WhatsNewDialogFragment.ARG_NEW_PKG_INFO, mPackageInfo);
-                                args.putParcelable(WhatsNewDialogFragment.ARG_OLD_PKG_INFO, mInstalledPackageInfo);
-                                WhatsNewDialogFragment dialogFragment = new WhatsNewDialogFragment();
-                                dialogFragment.setArguments(args);
-                                dialogFragment.show(mActivity.getSupportFragmentManager(), WhatsNewDialogFragment.TAG);
-                            });
-                    addToHorizontalLayout(R.string.update, R.drawable.ic_baseline_get_app_24)
-                            .setOnClickListener(v -> install());
+                    ActionItem whatsNewAction = new ActionItem(R.string.whats_new, io.github.muntashirakon.ui.R.drawable.ic_information);
+                    actionItems.add(whatsNewAction);
+                    whatsNewAction.setOnClickListener(v -> {
+                        WhatsNewDialogFragment dialogFragment = WhatsNewDialogFragment
+                                .getInstance(mPackageInfo, mInstalledPackageInfo);
+                        dialogFragment.show(getChildFragmentManager(), WhatsNewDialogFragment.TAG);
+                    });
+                    ActionItem updateAction = new ActionItem(R.string.update, R.drawable.ic_get_app);
+                    actionItems.add(updateAction);
+                    updateAction.setOnClickListener(v -> install());
                 } else if (installedVersionCode == thisVersionCode) {
                     // Needs reinstall
-                    addToHorizontalLayout(R.string.reinstall, R.drawable.ic_baseline_get_app_24)
-                            .setOnClickListener(v -> install());
-                } else {
+                    ActionItem reinstallAction = new ActionItem(R.string.reinstall, R.drawable.ic_get_app);
+                    actionItems.add(reinstallAction);
+                    reinstallAction.setOnClickListener(v -> install());
+                } else if (SelfPermissions.checkSelfOrRemotePermission(Manifest.permission.INSTALL_PACKAGES)) {
                     // Needs downgrade
-                    if (AppPref.isRootOrAdbEnabled()) {
-                        addToHorizontalLayout(R.string.downgrade, R.drawable.ic_baseline_get_app_24)
-                                .setOnClickListener(v -> install());
-                    }
+                    ActionItem downgradeAction = new ActionItem(R.string.downgrade, R.drawable.ic_get_app);
+                    actionItems.add(downgradeAction);
+                    downgradeAction.setOnClickListener(v -> install());
                 }
             }
         }
         // Set manifest
         if (FeatureController.isManifestEnabled()) {
-            addToHorizontalLayout(R.string.manifest, R.drawable.ic_tune_black_24dp).setOnClickListener(v -> {
+            ActionItem manifestAction = new ActionItem(R.string.manifest, R.drawable.ic_package);
+            actionItems.add(manifestAction);
+            manifestAction.setOnClickListener(v -> {
                 Intent intent = new Intent(mActivity, ManifestViewerActivity.class);
-                ApkFile apkFile = ApkFile.getInstance(mainModel.getApkFileKey());
-                if (apkFile.isSplit()) {
-                    // Display a list of apks
-                    List<ApkFile.Entry> apkEntries = apkFile.getEntries();
-                    CharSequence[] entryNames = new CharSequence[apkEntries.size()];
-                    for (int i = 0; i < apkEntries.size(); ++i) {
-                        entryNames[i] = apkEntries.get(i).toShortLocalizedString(requireActivity());
-                    }
-                    new MaterialAlertDialogBuilder(mActivity)
-                            .setTitle(R.string.select_apk)
-                            .setItems(entryNames, (dialog, which) -> executor.submit(() -> {
-                                try {
-                                    File file = apkEntries.get(which).getRealCachedFile();
-                                    intent.setDataAndType(Uri.fromFile(file), MimeTypeMap.getSingleton().getMimeTypeFromExtension("apk"));
-                                    runOnUiThread(() -> startActivity(intent));
-                                } catch (IOException | RemoteException e) {
-                                    e.printStackTrace();
-                                }
-                            }))
-                            .setNegativeButton(R.string.cancel, null)
-                            .show();
-                } else {
-                    // Open directly
-                    if (mainModel.getIsExternalApk()) {
-                        File file = new File(mApplicationInfo.publicSourceDir);
-                        intent.setDataAndType(Uri.fromFile(file), MimeTypeMap.getSingleton().getMimeTypeFromExtension("apk"));
-                    } else {
-                        intent.putExtra(ManifestViewerActivity.EXTRA_PACKAGE_NAME, mPackageName);
-                    }
-                    startActivity(intent);
-                }
+                startActivityForSplit(intent);
             });
         }
         // Set scanner
         if (FeatureController.isScannerEnabled()) {
-            addToHorizontalLayout(R.string.scanner, R.drawable.ic_baseline_security_24).setOnClickListener(v -> {
+            ActionItem scannerAction = new ActionItem(R.string.scanner, R.drawable.ic_security);
+            actionItems.add(scannerAction);
+            scannerAction.setOnClickListener(v -> {
                 Intent intent = new Intent(mActivity, ScannerActivity.class);
-                intent.putExtra(ScannerActivity.EXTRA_IS_EXTERNAL, isExternalApk);
-                File file = new File(mApplicationInfo.publicSourceDir);
-                intent.setDataAndType(Uri.fromFile(file), MimeTypeMap.getSingleton().getMimeTypeFromExtension("apk"));
-                startActivity(intent);
+                intent.putExtra(ScannerActivity.EXTRA_IS_EXTERNAL, mIsExternalApk);
+                startActivityForSplit(intent);
             });
         }
         // Root only features
-        if (!mainModel.getIsExternalApk()) {
+        if (!mIsExternalApk) {
             // Shared prefs (root only)
-            final List<ProxyFile> sharedPrefs = new ArrayList<>();
-            ProxyFile[] tmpPaths = getSharedPrefs(mApplicationInfo.dataDir);
+            final List<Path> sharedPrefs = new ArrayList<>();
+            Path[] tmpPaths = getSharedPrefs(mApplicationInfo.dataDir);
             if (tmpPaths != null) sharedPrefs.addAll(Arrays.asList(tmpPaths));
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 tmpPaths = getSharedPrefs(mApplicationInfo.deviceProtectedDataDir);
@@ -1072,20 +1586,21 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
                 for (int i = 0; i < sharedPrefs.size(); ++i) {
                     sharedPrefNames[i] = sharedPrefs.get(i).getName();
                 }
-                addToHorizontalLayout(R.string.shared_prefs, R.drawable.ic_view_list_black_24dp)
-                        .setOnClickListener(v -> new MaterialAlertDialogBuilder(mActivity)
-                                .setTitle(R.string.shared_prefs)
-                                .setItems(sharedPrefNames, (dialog, which) -> {
-                                    Intent intent = new Intent(mActivity, SharedPrefsActivity.class);
-                                    intent.putExtra(SharedPrefsActivity.EXTRA_PREF_LOCATION, sharedPrefs.get(which).getAbsolutePath());
-                                    intent.putExtra(SharedPrefsActivity.EXTRA_PREF_LABEL, mPackageLabel);
-                                    startActivity(intent);
-                                })
-                                .setNegativeButton(R.string.ok, null)
-                                .show());
+                ActionItem sharedPrefsAction = new ActionItem(R.string.shared_prefs, R.drawable.ic_view_list);
+                actionItems.add(sharedPrefsAction);
+                sharedPrefsAction.setOnClickListener(v -> new SearchableItemsDialogBuilder<>(mActivity, sharedPrefNames)
+                        .setTitle(R.string.shared_prefs)
+                        .setOnItemClickListener((dialog, which, item) -> {
+                            Intent intent = new Intent(mActivity, SharedPrefsActivity.class);
+                            intent.putExtra(SharedPrefsActivity.EXTRA_PREF_LOCATION, sharedPrefs.get(which).getUri());
+                            intent.putExtra(SharedPrefsActivity.EXTRA_PREF_LABEL, mAppLabel);
+                            startActivity(intent);
+                        })
+                        .setNegativeButton(R.string.ok, null)
+                        .show());
             }
             // Databases (root only)
-            final List<ProxyFile> databases = new ArrayList<>();
+            final List<Path> databases = new ArrayList<>();
             tmpPaths = getDatabases(mApplicationInfo.dataDir);
             if (tmpPaths != null) databases.addAll(Arrays.asList(tmpPaths));
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -1097,36 +1612,36 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
                 for (int i = 0; i < databases.size(); ++i) {
                     databases2[i] = databases.get(i).getName();
                 }
-                addToHorizontalLayout(R.string.databases, R.drawable.ic_assignment_black_24dp)
-                        .setOnClickListener(v -> new MaterialAlertDialogBuilder(mActivity)
-                                .setTitle(R.string.databases)
-                                .setItems(databases2, (dialog, i) -> {
-                                    // TODO: 7/7/21 VACUUM the database before opening it
-                                    Context ctx = AppManager.getContext();
-                                    Path dbPath = new Path(ctx, databases.get(i));
-                                    Intent openFile = new Intent(Intent.ACTION_VIEW);
-                                    openFile.setDataAndType(FmProvider.getContentUri(dbPath), "application/vnd.sqlite3");
-                                    openFile.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                    if (openFile.resolveActivityInfo(ctx.getPackageManager(), 0) != null) {
-                                        ctx.startActivity(openFile);
-                                    }
-                                })
-                                .setNegativeButton(R.string.ok, null)
-                                .show());
+                ActionItem dbAction = new ActionItem(R.string.databases, R.drawable.ic_database);
+                actionItems.add(dbAction);
+                dbAction.setOnClickListener(v -> new SearchableItemsDialogBuilder<>(v.getContext(), databases2)
+                        .setTitle(R.string.databases)
+                        .setOnItemClickListener((dialog, which, item) -> ThreadUtils.postOnBackgroundThread(() -> {
+                            // Vacuum database
+                            Runner.runCommand(new String[]{"sqlite3", databases.get(which).getFilePath(), "vacuum"});
+                            ThreadUtils.postOnMainThread(() -> {
+                                OpenWithDialogFragment fragment = OpenWithDialogFragment.getInstance(databases.get(which), "application/vnd.sqlite3");
+                                if (isDetached()) return;
+                                fragment.show(getChildFragmentManager(), OpenWithDialogFragment.TAG);
+                            });
+                        }))
+                        .setNegativeButton(R.string.close, null)
+                        .show());
             }
         }  // End root only features
         // Set F-Droid
-        Intent fdroid_intent = new Intent(Intent.ACTION_VIEW);
-        fdroid_intent.setData(Uri.parse("https://f-droid.org/packages/" + mPackageName));
-        List<ResolveInfo> resolvedActivities = mPackageManager.queryIntentActivities(fdroid_intent, 0);
-        if (resolvedActivities.size() > 0) {
-            addToHorizontalLayout(R.string.fdroid, R.drawable.ic_frost_fdroid_black_24dp)
-                    .setOnClickListener(v -> {
-                        try {
-                            startActivity(fdroid_intent);
-                        } catch (Exception ignored) {
-                        }
-                    });
+        Intent fdroidIntent = new Intent(Intent.ACTION_VIEW);
+        fdroidIntent.setData(Uri.parse("https://f-droid.org/packages/" + mPackageName));
+        List<ResolveInfo> resolvedActivities = mPackageManager.queryIntentActivities(fdroidIntent, 0);
+        if (!resolvedActivities.isEmpty()) {
+            ActionItem fdroidItem = new ActionItem(R.string.fdroid, R.drawable.ic_frost_fdroid);
+            actionItems.add(fdroidItem);
+            fdroidItem.setOnClickListener(v -> {
+                try {
+                    startActivity(fdroidIntent);
+                } catch (Exception ignored) {
+                }
+            });
         }
         // Set Aurora Store
         try {
@@ -1135,66 +1650,108 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
                 // Aurora Store is disabled or the installed version has promotional apps
                 throw new PackageManager.NameNotFoundException();
             }
-            addToHorizontalLayout(R.string.store, R.drawable.ic_frost_aurorastore_black_24dp)
-                    .setOnClickListener(v -> {
-                        Intent intent = new Intent(Intent.ACTION_VIEW);
-                        intent.setPackage(PACKAGE_NAME_AURORA_STORE);
-                        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        intent.setData(Uri.parse("https://play.google.com/store/apps/details?id=" + mPackageName));
-                        try {
-                            startActivity(intent);
-                        } catch (Exception ignored) {
-                        }
-                    });
+            ActionItem auroraStoreAction = new ActionItem(R.string.open_in_aurora_store, R.drawable.ic_frost_aurorastore);
+            actionItems.add(auroraStoreAction);
+            auroraStoreAction.setOnClickListener(v -> {
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.setPackage(PACKAGE_NAME_AURORA_STORE);
+                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                intent.setData(Uri.parse("https://play.google.com/store/apps/details?id=" + mPackageName));
+                try {
+                    startActivity(intent);
+                } catch (Exception ignored) {
+                }
+            });
         } catch (PackageManager.NameNotFoundException ignored) {
         }
-        View v = mHorizontalLayout.getChildAt(0);
-        if (v != null) v.requestFocus();
+        return actionItems;
+    }
+
+    @UiThread
+    private void startActivityForSplit(Intent intent) {
+        if (mMainModel == null) return;
+        ApkFile apkFile = mMainModel.getApkFile();
+        if (apkFile != null && apkFile.isSplit()) {
+            // Display a list of apks
+            List<ApkFile.Entry> apkEntries = apkFile.getEntries();
+            CharSequence[] entryNames = new CharSequence[apkEntries.size()];
+            for (int i = 0; i < apkEntries.size(); ++i) {
+                entryNames[i] = apkEntries.get(i).toShortLocalizedString(requireActivity());
+            }
+            new SearchableItemsDialogBuilder<>(mActivity, entryNames)
+                    .setTitle(R.string.select_apk)
+                    .setOnItemClickListener((dialog, which, item) -> ThreadUtils.postOnBackgroundThread(() -> {
+                        try {
+                            File file = apkEntries.get(which).getFile(false);
+                            intent.setDataAndType(Uri.fromFile(file), MimeTypeMap.getSingleton()
+                                    .getMimeTypeFromExtension("apk"));
+                            ThreadUtils.postOnMainThread(() -> {
+                                if (isDetached()) return;
+                                startActivity(intent);
+                            });
+                        } catch (IOException e) {
+                            UIUtils.displayLongToast("Error: " + e.getMessage());
+                        }
+                    }))
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
+        } else {
+            // Open directly
+            File file = new File(mApplicationInfo.publicSourceDir);
+            intent.setDataAndType(Uri.fromFile(file), MimeTypeMap.getSingleton().getMimeTypeFromExtension("apk"));
+            startActivity(intent);
+        }
     }
 
     @GuardedBy("mListItems")
     private void setPathsAndDirectories(@NonNull AppInfoViewModel.AppInfo appInfo) {
         synchronized (mListItems) {
             // Paths and directories
-            mListItems.add(ListItem.getGroupHeader(getString(R.string.paths_and_directories)));
+            mListItems.add(ListItem.newGroupStart(getString(R.string.paths_and_directories)));
             // Source directory (apk path)
             if (appInfo.sourceDir != null) {
-                mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.source_dir), appInfo.sourceDir,
-                        openAsFolderInFM(requireContext(), appInfo.sourceDir)));
-            }
-            // Split source directories
-            if (appInfo.splitEntries.size() > 0) {
-                for (ApkFile.Entry entry : appInfo.splitEntries) {
-                    mListItems.add(ListItem.getSelectableRegularItem(entry.toShortLocalizedString(mActivity),
-                            entry.getApkSource(), openAsFolderInFM(requireContext(), entry.getApkSource())));
-                }
+                ListItem listItem = ListItem.newSelectableRegularItem(getString(R.string.source_dir),
+                        appInfo.sourceDir, openAsFolderInFM(requireContext(), appInfo.sourceDir));
+                listItem.setActionContentDescription(R.string.open);
+                mListItems.add(listItem);
             }
             // Data dir
             if (appInfo.dataDir != null) {
-                mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.data_dir), appInfo.dataDir,
-                        openAsFolderInFM(requireContext(), appInfo.dataDir)));
+                ListItem listItem = ListItem.newSelectableRegularItem(getString(R.string.data_dir),
+                        appInfo.dataDir, openAsFolderInFM(requireContext(), appInfo.dataDir));
+                listItem.setActionContentDescription(R.string.open);
+                mListItems.add(listItem);
             }
             // Device-protected data dir
             if (appInfo.dataDeDir != null) {
-                mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.dev_protected_data_dir), appInfo.dataDeDir,
-                        openAsFolderInFM(requireContext(), appInfo.dataDeDir)));
+                ListItem listItem = ListItem.newSelectableRegularItem(getString(R.string.dev_protected_data_dir),
+                        appInfo.dataDeDir, openAsFolderInFM(requireContext(), appInfo.dataDeDir));
+                listItem.setActionContentDescription(R.string.open);
+                mListItems.add(listItem);
             }
             // External data dirs
             if (appInfo.extDataDirs.size() == 1) {
-                mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.external_data_dir), appInfo.extDataDirs.get(0),
-                        openAsFolderInFM(requireContext(), appInfo.extDataDirs.get(0))));
+                ListItem listItem = ListItem.newSelectableRegularItem(getString(R.string.external_data_dir),
+                        appInfo.extDataDirs.get(0), openAsFolderInFM(requireContext(),
+                                appInfo.extDataDirs.get(0)));
+                listItem.setActionContentDescription(R.string.open);
+                mListItems.add(listItem);
             } else {
                 for (int i = 0; i < appInfo.extDataDirs.size(); ++i) {
-                    mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.external_multiple_data_dir, i),
-                            appInfo.extDataDirs.get(i), openAsFolderInFM(requireContext(), appInfo.extDataDirs.get(i))));
+                    ListItem listItem = ListItem.newSelectableRegularItem(getString(R.string.external_multiple_data_dir, i),
+                            appInfo.extDataDirs.get(i), openAsFolderInFM(requireContext(),
+                                    appInfo.extDataDirs.get(i)));
+                    listItem.setActionContentDescription(R.string.open);
+                    mListItems.add(listItem);
                 }
             }
             // Native JNI library dir
             if (appInfo.jniDir != null) {
-                mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.native_library_dir), appInfo.jniDir,
-                        openAsFolderInFM(requireContext(), appInfo.jniDir)));
+                ListItem listItem = ListItem.newSelectableRegularItem(getString(R.string.native_library_dir), appInfo.jniDir,
+                        openAsFolderInFM(requireContext(), appInfo.jniDir));
+                listItem.setActionContentDescription(R.string.open);
+                mListItems.add(listItem);
             }
-            mListItems.add(ListItem.getGroupDivider());
         }
     }
 
@@ -1202,27 +1759,31 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
     private void setMoreInfo(AppInfoViewModel.AppInfo appInfo) {
         synchronized (mListItems) {
             // Set more info
-            mListItems.add(ListItem.getGroupHeader(getString(R.string.more_info)));
+            mListItems.add(ListItem.newGroupStart(getString(R.string.more_info)));
 
-            // Set installer version info
-            if (isExternalApk && mInstalledPackageInfo != null) {
-                ListItem listItem = ListItem.getSelectableRegularItem(getString(R.string.installed_version),
+            // Set installed version info
+            if (mIsExternalApk && mInstalledPackageInfo != null) {
+                ListItem listItem = ListItem.newSelectableRegularItem(getString(R.string.installed_version),
                         getString(R.string.version_name_with_code, mInstalledPackageInfo.versionName,
                                 PackageInfoCompat.getLongVersionCode(mInstalledPackageInfo)), v -> {
-                            Intent appDetailsIntent = new Intent(mActivity, AppDetailsActivity.class);
-                            appDetailsIntent.putExtra(AppDetailsActivity.EXTRA_PACKAGE_NAME, mPackageName);
-                            mActivity.startActivity(appDetailsIntent);
+                            Intent intent = AppDetailsActivity.getIntent(mActivity, mPackageName,
+                                    UserHandleHidden.myUserId());
+                            mActivity.startActivity(intent);
                         });
-                listItem.actionIcon = R.drawable.ic_info_outline_black_24dp;
+                listItem.setActionIcon(io.github.muntashirakon.ui.R.drawable.ic_information);
+                listItem.setActionContentDescription(R.string.app_info);
                 mListItems.add(listItem);
             }
 
             // SDK
             final StringBuilder sdk = new StringBuilder();
-            sdk.append(getString(R.string.sdk_max)).append(": ").append(mApplicationInfo.targetSdkVersion);
-            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.M)
-                sdk.append(", ").append(getString(R.string.sdk_min)).append(": ").append(mApplicationInfo.minSdkVersion);
-            mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.sdk), sdk.toString()));
+            sdk.append(getString(R.string.sdk_max)).append(LangUtils.getSeparatorString()).append(String.format(Locale.getDefault(), "%d",
+                    mApplicationInfo.targetSdkVersion));
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
+                sdk.append(", ").append(getString(R.string.sdk_min)).append(LangUtils.getSeparatorString())
+                        .append(String.format(Locale.getDefault(), "%d", mApplicationInfo.minSdkVersion));
+            }
+            mListItems.add(ListItem.newSelectableRegularItem(getString(R.string.sdk), sdk.toString()));
 
             // Set Flags
             final StringBuilder flags = new StringBuilder();
@@ -1236,55 +1797,106 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
                 flags.append(flags.length() == 0 ? "" : "|").append("FLAG_HARDWARE_ACCELERATED");
 
             if (flags.length() != 0) {
-                ListItem flagsItem = ListItem.getSelectableRegularItem(getString(R.string.sdk_flags), flags.toString());
-                flagsItem.flags |= LIST_ITEM_FLAG_MONOSPACE;
+                ListItem flagsItem = ListItem.newSelectableRegularItem(getString(R.string.sdk_flags), flags.toString());
+                flagsItem.setMonospace(true);
                 mListItems.add(flagsItem);
             }
-            if (isExternalApk) return;
+            if (mIsExternalApk) return;
 
-            mListItems.add(ListItem.getRegularItem(getString(R.string.date_installed), getTime(mPackageInfo.firstInstallTime)));
-            mListItems.add(ListItem.getRegularItem(getString(R.string.date_updated), getTime(mPackageInfo.lastUpdateTime)));
+            mListItems.add(ListItem.newRegularItem(getString(R.string.date_installed), getTime(mPackageInfo.firstInstallTime)));
+            mListItems.add(ListItem.newRegularItem(getString(R.string.date_updated), getTime(mPackageInfo.lastUpdateTime)));
             if (!mPackageName.equals(mApplicationInfo.processName)) {
-                mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.process_name), mApplicationInfo.processName));
+                mListItems.add(ListItem.newSelectableRegularItem(getString(R.string.process_name), mApplicationInfo.processName));
             }
             if (appInfo.installerApp != null) {
-                mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.installer_app), appInfo.installerApp));
+                ListItem installerItem = ListItem.newSelectableRegularItem(
+                        getString(R.string.installer_app), appInfo.installerApp,
+                        v -> displayInstallerDialog(Objects.requireNonNull(appInfo.installSource)));
+                installerItem.setActionIcon(R.drawable.ic_information_circle);
+                installerItem.setActionContentDescription(R.string.more_info);
+                mListItems.add(installerItem);
             }
-            mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.user_id), Integer.toString(mApplicationInfo.uid)));
+            mListItems.add(ListItem.newSelectableRegularItem(getString(R.string.user_id), String.format(Locale.getDefault(), "%d",
+                    mApplicationInfo.uid)));
             if (mPackageInfo.sharedUserId != null)
-                mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.shared_user_id), mPackageInfo.sharedUserId));
+                mListItems.add(ListItem.newSelectableRegularItem(getString(R.string.shared_user_id), mPackageInfo.sharedUserId));
+            if (appInfo.primaryCpuAbi != null) {
+                mListItems.add(ListItem.newSelectableRegularItem(getString(R.string.primary_abi),
+                        appInfo.primaryCpuAbi));
+            }
+            if (appInfo.zygotePreloadName != null) {
+                mListItems.add(ListItem.newSelectableRegularItem(getString(R.string.zygote_preload_name),
+                        appInfo.zygotePreloadName));
+            }
+            if (!mIsExternalApk) {
+                mListItems.add(ListItem.newRegularItem(getString(R.string.hidden_api_enforcement_policy),
+                        getHiddenApiEnforcementPolicy(appInfo.hiddenApiEnforcementPolicy)));
+            }
+            if (appInfo.seInfo != null) {
+                mListItems.add(ListItem.newSelectableRegularItem(getString(R.string.selinux), appInfo.seInfo));
+            }
             // Main activity
             if (appInfo.mainActivity != null) {
                 final ComponentName launchComponentName = appInfo.mainActivity.getComponent();
                 if (launchComponentName != null) {
                     final String mainActivity = launchComponentName.getClassName();
-                    mListItems.add(ListItem.getSelectableRegularItem(getString(R.string.main_activity), mainActivity,
-                            view -> startActivity(appInfo.mainActivity)));
+                    ListItem listItem = ListItem.newSelectableRegularItem(getString(R.string.main_activity),
+                            mainActivity, view -> startActivity(appInfo.mainActivity));
+                    listItem.setActionContentDescription(R.string.open);
+                    mListItems.add(listItem);
                 }
             }
-            mListItems.add(ListItem.getGroupDivider());
+        }
+    }
+
+    @NonNull
+    private String getHiddenApiEnforcementPolicy(int policy) {
+        switch (policy) {
+            case HIDDEN_API_ENFORCEMENT_DEFAULT:
+                return getString(R.string.hidden_api_enf_default_policy);
+            default:
+            case HIDDEN_API_ENFORCEMENT_DISABLED:
+                return getString(R.string.hidden_api_enf_policy_none);
+            case HIDDEN_API_ENFORCEMENT_JUST_WARN:
+                return getString(R.string.hidden_api_enf_policy_warn);
+            case HIDDEN_API_ENFORCEMENT_ENABLED:
+                return getString(R.string.hidden_api_enf_policy_dark_grey_and_black);
+            case HIDDEN_API_ENFORCEMENT_BLACK:
+                return getString(R.string.hidden_api_enf_policy_black);
         }
     }
 
     private void setDataUsage(@NonNull AppInfoViewModel.AppInfo appInfo) {
         AppUsageStatsManager.DataUsage dataUsage = appInfo.dataUsage;
-        if (dataUsage == null) return;
+        if (dataUsage == null) {
+            // No permission
+            return;
+        }
+        // Hide data usage if:
+        // 1. OS is Android 6.0 onwards, AND
+        // 2. The user is not the current user, AND
+        // 3. Remote UID is not system UID
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && mUserId != UserHandleHidden.myUserId()
+                && !SelfPermissions.isSystem()) {
+            return;
+        }
         synchronized (mListItems) {
             if (isDetached()) return;
-            mListItems.add(ListItem.getGroupHeader(getString(R.string.data_usage_msg)));
-            mListItems.add(ListItem.getInlineItem(getString(R.string.data_transmitted), getReadableSize(dataUsage.getTx())));
-            mListItems.add(ListItem.getInlineItem(getString(R.string.data_received), getReadableSize(dataUsage.getRx())));
-            mListItems.add(ListItem.getGroupDivider());
+            mListItems.add(ListItem.newGroupStart(getString(R.string.data_usage_msg)));
+            mListItems.add(ListItem.newInlineItem(getString(R.string.data_transmitted), getReadableSize(dataUsage.getTx())));
+            mListItems.add(ListItem.newInlineItem(getString(R.string.data_received), getReadableSize(dataUsage.getRx())));
         }
     }
 
-    @UiThread
+    @MainThread
     @GuardedBy("mListItems")
-    private void setupVerticalView() {
-        model.getAppInfo().observe(getViewLifecycleOwner(), appInfo -> {
+    private void setupVerticalView(AppInfoViewModel.AppInfo appInfo) {
+        if (mListFuture != null) mListFuture.cancel(true);
+        mListFuture = ThreadUtils.postOnBackgroundThread(() -> {
             synchronized (mListItems) {
                 mListItems.clear();
-                if (!isExternalApk) {
+                if (!mIsExternalApk) {
                     setPathsAndDirectories(appInfo);
                     setDataUsage(appInfo);
                     // Storage and Cache
@@ -1293,90 +1905,67 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
                     }
                 }
                 setMoreInfo(appInfo);
-                adapter.setAdapterList(mListItems);
+                ThreadUtils.postOnMainThread(() -> {
+                    if (isDetached()) return;
+                    ++mLoadedItemCount;
+                    if (mLoadedItemCount >= 4) {
+                        showProgressIndicator(false);
+                    }
+                    if (isDetached()) return;
+                    mAdapter.submitList(mListItems);
+                });
             }
         });
     }
 
     @Nullable
-    private ProxyFile[] getSharedPrefs(@NonNull String sourceDir) {
-        ProxyFile sharedPath = new ProxyFile(sourceDir, "shared_prefs");
-        return sharedPath.listFiles();
+    private Path[] getSharedPrefs(@Nullable String sourceDir) {
+        if (sourceDir == null) return null;
+        try {
+            Path sharedPath = Paths.get(sourceDir).findFile("shared_prefs");
+            return sharedPath.listFiles();
+        } catch (FileNotFoundException e) {
+            return null;
+        }
+
     }
 
-    private ProxyFile[] getDatabases(@NonNull String sourceDir) {
-        ProxyFile sharedPath = new ProxyFile(sourceDir, "databases");
-        return sharedPath.listFiles((dir, name) -> !(name.endsWith("-journal")
-                || name.endsWith("-wal") || name.endsWith("-shm")));
-    }
-
-    @NonNull
-    private Chip addChip(@StringRes int resId, @ColorRes int color) {
-        Chip chip = new Chip(mActivity);
-        chip.setText(resId);
-        chip.setChipBackgroundColorResource(color);
-        mTagCloud.addView(chip);
-        return chip;
-    }
-
-    @NonNull
-    private Chip addChip(CharSequence text, @SuppressWarnings("SameParameterValue") @ColorRes int color) {
-        Chip chip = new Chip(mActivity);
-        chip.setText(text);
-        chip.setChipBackgroundColorResource(color);
-        mTagCloud.addView(chip);
-        return chip;
-    }
-
-    @NonNull
-    private Chip addChip(@StringRes int resId) {
-        Chip chip = new Chip(mActivity);
-        chip.setText(resId);
-        mTagCloud.addView(chip);
-        return chip;
-    }
-
-    @NonNull
-    private Chip addChip(CharSequence text) {
-        Chip chip = new Chip(mActivity);
-        chip.setText(text);
-        mTagCloud.addView(chip);
-        return chip;
-    }
-
-    @NonNull
-    private View addToHorizontalLayout(@StringRes int stringResId, @DrawableRes int iconResId) {
-        View view = getLayoutInflater().inflate(R.layout.item_app_info_actions, mHorizontalLayout, false);
-        TextView textView = view.findViewById(R.id.item_text);
-        textView.setText(stringResId);
-        textView.setCompoundDrawablesWithIntrinsicBounds(null, ContextCompat.getDrawable(mActivity, iconResId), null, null);
-        mHorizontalLayout.addView(view);
-        return view;
+    @Nullable
+    private Path[] getDatabases(@Nullable String sourceDir) {
+        if (sourceDir == null) return null;
+        try {
+            Path sharedPath = Paths.get(sourceDir).findFile("databases");
+            return sharedPath.listFiles((dir, name) -> !(name.endsWith("-journal")
+                    || name.endsWith("-wal") || name.endsWith("-shm")));
+        } catch (FileNotFoundException e) {
+            return null;
+        }
     }
 
     @GuardedBy("mListItems")
     private void setStorageAndCache(AppInfoViewModel.AppInfo appInfo) {
         if (FeatureController.isUsageAccessEnabled()) {
             // Grant optional READ_PHONE_STATE permission
-            if (!PermissionUtils.hasPermission(mActivity, Manifest.permission.READ_PHONE_STATE) &&
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-                runOnUiThread(() -> requestPerm.launch(Manifest.permission.READ_PHONE_STATE, granted -> {
-                    if (granted) model.loadAppInfo();
+            if (AppUsageStatsManager.requireReadPhoneStatePermission()) {
+                ThreadUtils.postOnMainThread(() -> mRequestPerm.launch(Manifest.permission.READ_PHONE_STATE, granted -> {
+                    if (granted) {
+                        mAppInfoModel.loadAppInfo(mPackageInfo, mIsExternalApk);
+                    }
                 }));
             }
         }
-        if (!PermissionUtils.hasUsageStatsPermission(mActivity)) {
-            runOnUiThread(() -> new MaterialAlertDialogBuilder(mActivity)
+        if (!SelfPermissions.checkUsageStatsPermission()) {
+            ThreadUtils.postOnMainThread(() -> new MaterialAlertDialogBuilder(mActivity)
                     .setTitle(R.string.grant_usage_access)
                     .setMessage(R.string.grant_usage_acess_message)
                     .setPositiveButton(R.string.go, (dialog, which) -> {
                         try {
-                            activityLauncher.launch(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS), result -> {
-                                if (PermissionUtils.hasUsageStatsPermission(mActivity)) {
+                            mActivityLauncher.launch(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS), result -> {
+                                if (SelfPermissions.checkUsageStatsPermission()) {
                                     FeatureController.getInstance().modifyState(FeatureController
                                             .FEAT_USAGE_ACCESS, true);
                                     // Reload app info
-                                    model.loadAppInfo();
+                                    mAppInfoModel.loadAppInfo(mPackageInfo, mIsExternalApk);
                                 }
                             });
                         } catch (SecurityException ignore) {
@@ -1392,52 +1981,137 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
         PackageSizeInfo sizeInfo = appInfo.sizeInfo;
         if (sizeInfo == null) return;
         synchronized (mListItems) {
-            mListItems.add(ListItem.getGroupHeader(getString(R.string.storage_and_cache)));
-            mListItems.add(ListItem.getInlineItem(getString(R.string.app_size), getReadableSize(sizeInfo.codeSize)));
-            mListItems.add(ListItem.getInlineItem(getString(R.string.data_size), getReadableSize(sizeInfo.dataSize)));
-            mListItems.add(ListItem.getInlineItem(getString(R.string.cache_size), getReadableSize(sizeInfo.cacheSize)));
+            mListItems.add(ListItem.newGroupStart(getString(R.string.storage_and_cache)));
+            mListItems.add(ListItem.newInlineItem(getString(R.string.app_size), getReadableSize(sizeInfo.codeSize)));
+            mListItems.add(ListItem.newInlineItem(getString(R.string.data_size), getReadableSize(sizeInfo.dataSize)));
+            mListItems.add(ListItem.newInlineItem(getString(R.string.cache_size), getReadableSize(sizeInfo.cacheSize)));
             if (sizeInfo.obbSize != 0) {
-                mListItems.add(ListItem.getInlineItem(getString(R.string.obb_size), getReadableSize(sizeInfo.obbSize)));
+                mListItems.add(ListItem.newInlineItem(getString(R.string.obb_size), getReadableSize(sizeInfo.obbSize)));
             }
             if (sizeInfo.mediaSize != 0) {
-                mListItems.add(ListItem.getInlineItem(getString(R.string.media_size), getReadableSize(sizeInfo.mediaSize)));
+                mListItems.add(ListItem.newInlineItem(getString(R.string.media_size), getReadableSize(sizeInfo.mediaSize)));
             }
-            mListItems.add(ListItem.getInlineItem(getString(R.string.total_size), getReadableSize(sizeInfo.getTotalSize())));
-            mListItems.add(ListItem.getGroupDivider());
+            mListItems.add(ListItem.newInlineItem(getString(R.string.total_size), getReadableSize(sizeInfo.getTotalSize())));
+        }
+    }
+
+    @MainThread
+    private void freeze(boolean freeze) {
+        if (mMainModel == null) return;
+        if (freeze) {
+            mMainModel.loadFreezeType();
+        } else {
+            // Unfreeze
+            ThreadUtils.postOnBackgroundThread(this::doUnfreeze);
+        }
+    }
+
+    private void showFreezeDialog(int freezeType, boolean isCustom) {
+        View view = View.inflate(mActivity, R.layout.item_checkbox, null);
+        MaterialCheckBox checkBox = view.findViewById(R.id.checkbox);
+        checkBox.setText(R.string.remember_option_for_this_app);
+        checkBox.setChecked(isCustom);
+        FreezeUnfreeze.getFreezeDialog(mActivity, freezeType)
+                .setIcon(R.drawable.ic_snowflake)
+                .setTitle(R.string.freeze)
+                .setView(view)
+                .setPositiveButton(R.string.freeze, (dialog, which, selectedItem) -> {
+                    if (selectedItem == null) {
+                        return;
+                    }
+                    ThreadUtils.postOnBackgroundThread(() -> doFreeze(selectedItem, checkBox.isChecked()));
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    @WorkerThread
+    private void doFreeze(@FreezeUtils.FreezeMethod int freezeType, boolean remember) {
+        try {
+            if (remember) {
+                FreezeUtils.storeFreezeMethod(mPackageName, freezeType);
+            } else {
+                FreezeUtils.deleteFreezeMethod(mPackageName);
+            }
+            FreezeUtils.freeze(mPackageName, mUserId, freezeType);
+        } catch (Throwable th) {
+            Log.e(TAG, th);
+            ThreadUtils.postOnMainThread(() -> displayLongToast(R.string.failed_to_freeze, mAppLabel));
         }
     }
 
     @WorkerThread
-    private void loadPackageInfo() {
-        // Set App Icon
-        Drawable icon = mApplicationInfo.loadIcon(mPackageManager);
-        runOnUiThread(() -> {
-            if (isAdded() && !isDetached()) {
-                iconView.setImageDrawable(icon);
-            }
-        });
-        // (Re)load views
-        model.loadPackageLabel();
-        model.loadTagCloud();
-        runOnUiThread(() -> {
-            if (isAdded() && !isDetached()) {
-                setHorizontalActions();
-            }
-        });
-        model.loadAppInfo();
-        runOnUiThread(() -> showProgressIndicator(false));
+    private void doUnfreeze() {
+        try {
+            FreezeUtils.unfreeze(mPackageName, mUserId);
+        } catch (Throwable th) {
+            Log.e(TAG, th);
+            ThreadUtils.postOnMainThread(() -> displayLongToast(R.string.failed_to_unfreeze, mAppLabel));
+        }
     }
 
-    @MainThread
-    private void disable() {
-        try {
-            PackageManagerCompat.setApplicationEnabledSetting(mPackageName,
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
-                    0, mainModel.getUserHandle());
-        } catch (RemoteException | SecurityException e) {
-            Log.e(TAG, e);
-            displayLongToast(R.string.failed_to_disable, mPackageLabel);
+    private void createFreezeShortcut(boolean isFrozen) {
+        if (mMainModel == null) return;
+        List<Integer> allFlags = new ArrayList<>(3);
+        for (int i = 0; i < 3; ++i) {
+            allFlags.add(1 << i);
         }
+        new SearchableMultiChoiceDialogBuilder<>(mActivity, allFlags, R.array.freeze_unfreeze_flags)
+                .setTitle(R.string.freeze_unfreeze)
+                .setPositiveButton(R.string.create_shortcut, (dialog, which, selections) -> {
+                    int flags = 0;
+                    for (int flag : selections) {
+                        flags |= flag;
+                    }
+                    Bitmap icon = getBitmapFromDrawable(mIconView.getDrawable());
+                    FreezeUnfreezeShortcutInfo shortcutInfo = new FreezeUnfreezeShortcutInfo(mPackageName, mUserId, flags);
+                    shortcutInfo.setName(mAppLabel);
+                    shortcutInfo.setIcon(isFrozen ? getDimmedBitmap(icon) : icon);
+                    CreateShortcutDialogFragment dialog1 = CreateShortcutDialogFragment.getInstance(shortcutInfo);
+                    dialog1.show(getChildFragmentManager(), CreateShortcutDialogFragment.TAG);
+                })
+                .show();
+    }
+
+    private void displayInstallerDialog(@NonNull InstallSourceInfoCompat installSource) {
+        List<CharSequence> installerInfoList = new ArrayList<>(3);
+        List<String> packageNames = new ArrayList<>(3);
+        if (installSource.getInstallingPackageLabel() != null) {
+            CharSequence info = new SpannableStringBuilder(getSmallerText(getString(R.string.installer)))
+                    .append("\n")
+                    .append(getTitleText(requireContext(), installSource.getInstallingPackageLabel()))
+                    .append("\n")
+                    .append(installSource.getInstallingPackageName());
+            installerInfoList.add(info);
+            packageNames.add(installSource.getInstallingPackageName());
+        }
+        if (installSource.getInitiatingPackageLabel() != null) {
+            CharSequence info = new SpannableStringBuilder(getSmallerText(getString(R.string.actual_installer)))
+                    .append("\n")
+                    .append(getTitleText(requireContext(), installSource.getInitiatingPackageLabel()))
+                    .append("\n")
+                    .append(installSource.getInitiatingPackageName());
+            installerInfoList.add(info);
+            packageNames.add(installSource.getInitiatingPackageName());
+        }
+        if (installSource.getOriginatingPackageLabel() != null) {
+            CharSequence info = new SpannableStringBuilder(getSmallerText(getString(R.string.apk_source)))
+                    .append("\n")
+                    .append(getTitleText(requireContext(), installSource.getOriginatingPackageLabel()))
+                    .append("\n")
+                    .append(installSource.getOriginatingPackageName());
+            installerInfoList.add(info);
+            packageNames.add(installSource.getOriginatingPackageName());
+        }
+        new SearchableItemsDialogBuilder<>(requireContext(), installerInfoList)
+                .setTitle(R.string.installer)
+                .setOnItemClickListener((dialog, which, item) -> {
+                    String packageName = packageNames.get(which);
+                    Intent intent = AppDetailsActivity.getIntent(requireContext(), packageName, mUserId);
+                    startActivity(intent);
+                })
+                .setNegativeButton(R.string.close, null)
+                .show();
     }
 
     /**
@@ -1448,7 +2122,7 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
      */
     @NonNull
     private String getTime(long time) {
-        return DateUtils.formatWeekMediumDateTime(time);
+        return DateUtils.formatLongDateTime(requireContext(), time);
     }
 
     /**
@@ -1465,10 +2139,5 @@ public class AppInfoFragment extends Fragment implements SwipeRefreshLayout.OnRe
         if (mProgressIndicator == null) return;
         if (show) mProgressIndicator.show();
         else mProgressIndicator.hide();
-    }
-
-    @AnyThread
-    private void runOnUiThread(Runnable runnable) {
-        UiThreadHandler.run(runnable);
     }
 }

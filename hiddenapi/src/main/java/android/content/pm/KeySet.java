@@ -3,7 +3,10 @@
 package android.content.pm;
 
 import android.os.IBinder;
+import android.os.Parcel;
 import android.os.Parcelable;
+
+import misc.utils.HiddenUtil;
 
 /**
  * Represents a {@code KeySet} that has been declared in the AndroidManifest.xml
@@ -12,10 +15,22 @@ import android.os.Parcelable;
  */
 public class KeySet implements Parcelable {
     public KeySet(IBinder token) {
-        throw new UnsupportedOperationException();
+        HiddenUtil.throwUOE(token);
     }
 
     public IBinder getToken() {
-        throw new UnsupportedOperationException();
+        return HiddenUtil.throwUOE();
     }
+
+    @Override
+    public void writeToParcel(Parcel dest, int flags) {
+        HiddenUtil.throwUOE(dest, flags);
+    }
+
+    @Override
+    public int describeContents() {
+        return HiddenUtil.throwUOE();
+    }
+
+    public static final Creator<KeySet> CREATOR = HiddenUtil.creator();
 }

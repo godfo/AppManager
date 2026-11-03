@@ -3,19 +3,26 @@
 package io.github.muntashirakon.AppManager.rules.struct;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
 
-import io.github.muntashirakon.AppManager.appops.AppOpsManager;
+import io.github.muntashirakon.AppManager.magisk.MagiskProcess;
 import io.github.muntashirakon.AppManager.rules.RuleType;
+import io.github.muntashirakon.AppManager.utils.FreezeUtils;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
+import android.app.AppOpsManager;
+
+@RunWith(RobolectricTestRunner.class)
 public class RuleEntryTest {
     private static final String PACKAGE_NAME = "sample.package";
 
     @Test
     public void flattenActivityToString() {
         RuleEntry rule = new ComponentRule(PACKAGE_NAME, ".activity", RuleType.ACTIVITY,
-                ComponentRule.COMPONENT_BLOCKED);
+                ComponentRule.COMPONENT_BLOCKED_IFW_DISABLE);
         assertEquals(PACKAGE_NAME + "\t.activity\tACTIVITY\ttrue", rule.flattenToString(true));
         assertEquals(".activity\tACTIVITY\ttrue", rule.flattenToString(false));
     }
@@ -23,15 +30,15 @@ public class RuleEntryTest {
     @Test
     public void flattenProviderToString() {
         RuleEntry rule = new ComponentRule(PACKAGE_NAME, ".provider", RuleType.PROVIDER,
-                ComponentRule.COMPONENT_TO_BE_BLOCKED);
-        assertEquals(PACKAGE_NAME + "\t.provider\tPROVIDER\tfalse", rule.flattenToString(true));
-        assertEquals(".provider\tPROVIDER\tfalse", rule.flattenToString(false));
+                ComponentRule.COMPONENT_TO_BE_BLOCKED_IFW_DISABLE);
+        assertEquals(PACKAGE_NAME + "\t.provider\tPROVIDER\tdis_false", rule.flattenToString(true));
+        assertEquals(".provider\tPROVIDER\tdis_false", rule.flattenToString(false));
     }
 
     @Test
     public void flattenReceiverToString() {
         RuleEntry rule = new ComponentRule(PACKAGE_NAME, ".receiver", RuleType.RECEIVER,
-                ComponentRule.COMPONENT_TO_BE_UNBLOCKED);
+                ComponentRule.COMPONENT_TO_BE_DEFAULTED);
         assertEquals(PACKAGE_NAME + "\t.receiver\tRECEIVER\tunblocked", rule.flattenToString(true));
         assertEquals(".receiver\tRECEIVER\tunblocked", rule.flattenToString(false));
     }
@@ -39,7 +46,7 @@ public class RuleEntryTest {
     @Test
     public void flattenServiceToString() {
         RuleEntry rule = new ComponentRule(PACKAGE_NAME, ".service", RuleType.SERVICE,
-                ComponentRule.COMPONENT_TO_BE_UNBLOCKED);
+                ComponentRule.COMPONENT_TO_BE_DEFAULTED);
         assertEquals(PACKAGE_NAME + "\t.service\tSERVICE\tunblocked", rule.flattenToString(true));
         assertEquals(".service\tSERVICE\tunblocked", rule.flattenToString(false));
     }
@@ -60,9 +67,40 @@ public class RuleEntryTest {
 
     @Test
     public void flattenMagiskHideToString() {
-        RuleEntry rule = new MagiskHideRule(PACKAGE_NAME, true);
-        assertEquals(PACKAGE_NAME + "\tSTUB\tMAGISK_HIDE\ttrue", rule.flattenToString(true));
-        assertEquals("STUB\tMAGISK_HIDE\ttrue", rule.flattenToString(false));
+        MagiskProcess mp = new MagiskProcess(PACKAGE_NAME, "pkg:process");
+        mp.setEnabled(true);
+        RuleEntry rule = new MagiskHideRule(mp);
+        assertEquals(PACKAGE_NAME + "\tpkg:process\tMAGISK_HIDE\ttrue\tfalse", rule.flattenToString(true));
+        assertEquals("pkg:process\tMAGISK_HIDE\ttrue\tfalse", rule.flattenToString(false));
+    }
+
+    @Test
+    public void flattenMagiskHideIsolatedToString() {
+        MagiskProcess mp = new MagiskProcess(PACKAGE_NAME, "pkg:process");
+        mp.setEnabled(true);
+        mp.setIsolatedProcess(true);
+        RuleEntry rule = new MagiskHideRule(mp);
+        assertEquals(PACKAGE_NAME + "\tpkg:process\tMAGISK_HIDE\ttrue\ttrue", rule.flattenToString(true));
+        assertEquals("pkg:process\tMAGISK_HIDE\ttrue\ttrue", rule.flattenToString(false));
+    }
+
+    @Test
+    public void flattenMagiskDenyListToString() {
+        MagiskProcess mp = new MagiskProcess(PACKAGE_NAME, "pkg:process");
+        mp.setEnabled(true);
+        RuleEntry rule = new MagiskDenyListRule(mp);
+        assertEquals(PACKAGE_NAME + "\tpkg:process\tMAGISK_DENY_LIST\ttrue\tfalse", rule.flattenToString(true));
+        assertEquals("pkg:process\tMAGISK_DENY_LIST\ttrue\tfalse", rule.flattenToString(false));
+    }
+
+    @Test
+    public void flattenMagiskDenyListIsolatedToString() {
+        MagiskProcess mp = new MagiskProcess(PACKAGE_NAME, "pkg:process");
+        mp.setEnabled(true);
+        mp.setIsolatedProcess(true);
+        RuleEntry rule = new MagiskDenyListRule(mp);
+        assertEquals(PACKAGE_NAME + "\tpkg:process\tMAGISK_DENY_LIST\ttrue\ttrue", rule.flattenToString(true));
+        assertEquals("pkg:process\tMAGISK_DENY_LIST\ttrue\ttrue", rule.flattenToString(false));
     }
 
     @Test
@@ -94,9 +132,16 @@ public class RuleEntryTest {
     }
 
     @Test
+    public void flattenFreezeToString() {
+        RuleEntry rule = new FreezeRule(PACKAGE_NAME, FreezeUtils.FREEZE_DISABLE);
+        assertEquals(PACKAGE_NAME + "\tSTUB\tFREEZE\t" + FreezeUtils.FREEZE_DISABLE, rule.flattenToString(true));
+        assertEquals("STUB\tFREEZE\t" + FreezeUtils.FREEZE_DISABLE, rule.flattenToString(false));
+    }
+
+    @Test
     public void addPackageWithTab() {
         ComponentRule rule = new ComponentRule(PACKAGE_NAME, ".activity", RuleType.ACTIVITY,
-                ComponentRule.COMPONENT_BLOCKED);
+                ComponentRule.COMPONENT_BLOCKED_IFW_DISABLE);
         assertEquals(PACKAGE_NAME + "\t", rule.addPackageWithTab(true));
         assertEquals("", rule.addPackageWithTab(false));
     }
@@ -104,7 +149,7 @@ public class RuleEntryTest {
     @Test
     public void unflattenActivityFromString() {
         RuleEntry rule = new ComponentRule(PACKAGE_NAME, ".activity", RuleType.ACTIVITY,
-                ComponentRule.COMPONENT_BLOCKED);
+                ComponentRule.COMPONENT_BLOCKED_IFW_DISABLE);
         assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\t.activity\tACTIVITY\ttrue", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\t.activity\tACTIVITY\ttrue", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, ".activity\tACTIVITY\ttrue", false), rule);
@@ -113,7 +158,7 @@ public class RuleEntryTest {
     @Test
     public void unflattenProviderFromString() {
         RuleEntry rule = new ComponentRule(PACKAGE_NAME, ".provider", RuleType.PROVIDER,
-                ComponentRule.COMPONENT_TO_BE_BLOCKED);
+                ComponentRule.COMPONENT_TO_BE_DISABLED);
         assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\t.provider\tPROVIDER\tfalse", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\t.provider\tPROVIDER\tfalse", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, ".provider\tPROVIDER\tfalse", false), rule);
@@ -122,7 +167,7 @@ public class RuleEntryTest {
     @Test
     public void unflattenReceiverFromString() {
         RuleEntry rule = new ComponentRule(PACKAGE_NAME, ".receiver", RuleType.RECEIVER,
-                ComponentRule.COMPONENT_TO_BE_UNBLOCKED);
+                ComponentRule.COMPONENT_TO_BE_DEFAULTED);
         assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\t.receiver\tRECEIVER\tunblocked", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\t.receiver\tRECEIVER\tunblocked", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, ".receiver\tRECEIVER\tunblocked", false), rule);
@@ -131,7 +176,7 @@ public class RuleEntryTest {
     @Test
     public void unflattenServiceFromString() {
         RuleEntry rule = new ComponentRule(PACKAGE_NAME, ".service", RuleType.SERVICE,
-                ComponentRule.COMPONENT_TO_BE_UNBLOCKED);
+                ComponentRule.COMPONENT_TO_BE_DEFAULTED);
         assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\t.service\tSERVICE\tunblocked", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\t.service\tSERVICE\tunblocked", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, ".service\tSERVICE\tunblocked", false), rule);
@@ -162,11 +207,71 @@ public class RuleEntryTest {
     }
 
     @Test
-    public void unflattenMagiskHideFromString() {
-        RuleEntry rule = new MagiskHideRule(PACKAGE_NAME, true);
+    public void unflattenMagiskHideFromStringOld() {
+        MagiskProcess mp = new MagiskProcess(PACKAGE_NAME, PACKAGE_NAME);
+        mp.setEnabled(true);
+        RuleEntry rule = new MagiskHideRule(mp);
         assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\tSTUB\tMAGISK_HIDE\ttrue", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\tSTUB\tMAGISK_HIDE\ttrue", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, "STUB\tMAGISK_HIDE\ttrue", false), rule);
+    }
+
+    @Test
+    public void unflattenMagiskHideFromStringNew() {
+        MagiskProcess mp = new MagiskProcess(PACKAGE_NAME, "pkg:process");
+        mp.setEnabled(true);
+        RuleEntry rule = new MagiskHideRule(mp);
+        assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\tpkg:process\tMAGISK_HIDE\ttrue", true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\tpkg:process\tMAGISK_HIDE\ttrue", true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, "pkg:process\tMAGISK_HIDE\ttrue", false), rule);
+    }
+
+    @Test
+    public void unflattenMagiskHideIsolatedFromString() {
+        MagiskProcess mp = new MagiskProcess(PACKAGE_NAME, "pkg:process");
+        mp.setEnabled(true);
+        mp.setIsolatedProcess(true);
+        RuleEntry rule = new MagiskHideRule(mp);
+        assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\tpkg:process\tMAGISK_HIDE\ttrue\ttrue", true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\tpkg:process\tMAGISK_HIDE\ttrue\ttrue", true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, "pkg:process\tMAGISK_HIDE\ttrue\ttrue", false), rule);
+    }
+
+    @Test
+    public void unflattenMagiskDenyListFromString() {
+        MagiskProcess mp = new MagiskProcess(PACKAGE_NAME, "pkg:process");
+        mp.setEnabled(true);
+        RuleEntry rule = new MagiskDenyListRule(mp);
+        assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\tpkg:process\tMAGISK_DENY_LIST\ttrue", true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\tpkg:process\tMAGISK_DENY_LIST\ttrue", true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, "pkg:process\tMAGISK_DENY_LIST\ttrue", false), rule);
+    }
+
+    @Test
+    public void unflattenMagiskDenyListIsolatedFromString() {
+        MagiskProcess mp = new MagiskProcess(PACKAGE_NAME, "pkg:process");
+        mp.setEnabled(true);
+        mp.setIsolatedProcess(true);
+        RuleEntry rule = new MagiskDenyListRule(mp);
+        assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\tpkg:process\tMAGISK_DENY_LIST\ttrue\ttrue", true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\tpkg:process\tMAGISK_DENY_LIST\ttrue\ttrue", true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, "pkg:process\tMAGISK_DENY_LIST\ttrue\ttrue", false), rule);
+    }
+
+    @Test
+    public void unflattenMagiskDenyListZygoteFromString() {
+        String processName = PACKAGE_NAME + "_zygote";
+        MagiskProcess mp = new MagiskProcess(PACKAGE_NAME, processName);
+        mp.setEnabled(true);
+        mp.setIsolatedProcess(true);
+        mp.setAppZygote(true);
+        RuleEntry rule = new MagiskDenyListRule(mp);
+        MagiskDenyListRule parsedRule = (MagiskDenyListRule) RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\t" + processName + "\tMAGISK_DENY_LIST\ttrue\ttrue", true);
+        // Check if it automatically detects zygote process
+        assertTrue(parsedRule.getMagiskProcess().isAppZygote());
+        assertEquals(parsedRule, rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\t" + processName + "\tMAGISK_DENY_LIST\ttrue\ttrue", true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, processName + "\tMAGISK_DENY_LIST\ttrue\ttrue", false), rule);
     }
 
     @Test
@@ -199,5 +304,13 @@ public class RuleEntryTest {
         assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\tSTUB\tSSAID\tbc9948c6", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\tSTUB\tSSAID\tbc9948c6", true), rule);
         assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, "STUB\tSSAID\tbc9948c6", false), rule);
+    }
+
+    @Test
+    public void unflattenFreezeFromString() {
+        RuleEntry rule = new FreezeRule(PACKAGE_NAME, FreezeUtils.FREEZE_DISABLE);
+        assertEquals(RuleEntry.unflattenFromString(null, PACKAGE_NAME + "\tSTUB\tFREEZE\t" + FreezeUtils.FREEZE_DISABLE, true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, PACKAGE_NAME + "\tSTUB\tFREEZE\t" + FreezeUtils.FREEZE_DISABLE, true), rule);
+        assertEquals(RuleEntry.unflattenFromString(PACKAGE_NAME, "STUB\tFREEZE\t" + FreezeUtils.FREEZE_DISABLE, false), rule);
     }
 }

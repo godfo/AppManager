@@ -7,13 +7,6 @@
 
 package org.apache.commons.compress.archivers.tar;
 
-import java.io.ByteArrayOutputStream;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.*;
-
-import io.github.muntashirakon.io.ProxyInputStream;
 import org.apache.commons.compress.archivers.ArchiveEntry;
 import org.apache.commons.compress.archivers.ArchiveInputStream;
 import org.apache.commons.compress.archivers.zip.ZipEncoding;
@@ -21,6 +14,17 @@ import org.apache.commons.compress.archivers.zip.ZipEncodingHelper;
 import org.apache.commons.compress.utils.ArchiveUtils;
 import org.apache.commons.compress.utils.BoundedInputStream;
 import org.apache.commons.compress.utils.IOUtils;
+
+import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * The TarInputStream reads a UNIX tar archive as an InputStream.
@@ -453,7 +457,7 @@ public class TarArchiveInputStream extends ArchiveInputStream {
      */
     private long getActuallySkipped(final long available, final long skipped, final long expected) throws IOException {
         long actuallySkipped = skipped;
-        if (inputStream instanceof FileInputStream || inputStream instanceof ProxyInputStream) {
+        if (inputStream instanceof FileInputStream) {
             actuallySkipped = Math.min(skipped, available);
         }
 
@@ -550,7 +554,7 @@ public class TarArchiveInputStream extends ArchiveInputStream {
     }
 
     private void readGlobalPaxHeaders() throws IOException {
-        globalPaxHeaders = TarUtils.parsePaxHeaders(this, globalSparseHeaders, globalPaxHeaders);
+        globalPaxHeaders = TarUtils.parsePaxHeaders(this, globalSparseHeaders, globalPaxHeaders, entrySize);
         getNextEntry(); // Get the actual file entry
 
         if (currEntry == null) {
@@ -585,7 +589,7 @@ public class TarArchiveInputStream extends ArchiveInputStream {
      */
     private void paxHeaders() throws IOException {
         List<TarArchiveStructSparse> sparseHeaders = new ArrayList<>();
-        final Map<String, String> headers = TarUtils.parsePaxHeaders(this, sparseHeaders, globalPaxHeaders);
+        final Map<String, String> headers = TarUtils.parsePaxHeaders(this, sparseHeaders, globalPaxHeaders, entrySize);
 
         // for 0.1 PAX Headers
         if (headers.containsKey("GNU.sparse.map")) {
@@ -675,7 +679,7 @@ public class TarArchiveInputStream extends ArchiveInputStream {
         } finally {
             if (shouldReset && marked) {
                 pushedBackBytes(recordSize);
-            	inputStream.reset();
+                inputStream.reset();
             }
         }
     }

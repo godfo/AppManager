@@ -4,47 +4,41 @@ package io.github.muntashirakon.AppManager.crypto;
 
 import androidx.annotation.NonNull;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
+import io.github.muntashirakon.AppManager.backup.CryptoUtils;
 import io.github.muntashirakon.io.Path;
 
 public class DummyCrypto implements Crypto {
-    Path[] newFiles;
-
-    @Override
-    public boolean encrypt(@NonNull Path[] files) {
-        // Have to return new files to be processed further
-        newFiles = files;
-        return true;
-    }
-
-    @Override
-    public void encrypt(@NonNull InputStream unencryptedStream, @NonNull OutputStream encryptedStream) throws IOException {
-        // Do nothing since both are the same stream
-    }
-
-    @Override
-    public boolean decrypt(@NonNull Path[] files) {
-        // The new files will be deleted, so don't send
-        newFiles = null;
-        return true;
-    }
-
-    @Override
-    public void decrypt(@NonNull InputStream encryptedStream, @NonNull OutputStream unencryptedStream) throws IOException {
-        // Do nothing since both are the same stream
-    }
-
     @NonNull
     @Override
-    public Path[] getNewFiles() {
-        if (newFiles == null) return new Path[0];
-        return newFiles;
+    public String getModeName() {
+        return CryptoUtils.MODE_NO_ENCRYPTION;
+    }
+
+    @Override
+    public void encrypt(@NonNull Path[] inputFiles, @NonNull Path[] outputFiles) {
+        // Do nothing since both are the same set of files
+    }
+
+    @Override
+    public void encrypt(@NonNull InputStream unencryptedStream, @NonNull OutputStream encryptedStream) {
+        // Do nothing since both are the same stream
+    }
+
+    @Override
+    public void decrypt(@NonNull Path[] inputFiles, @NonNull Path[] outputFiles) {
+        // Do nothing since both are the same set of files
+    }
+
+    @Override
+    public void decrypt(@NonNull InputStream encryptedStream, @NonNull OutputStream unencryptedStream) {
+        // Do nothing since both are the same stream
     }
 
     @Override
     public void close() {
+        // Nothing to close
     }
 }

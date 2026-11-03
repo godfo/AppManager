@@ -5,6 +5,7 @@ package io.github.muntashirakon.AppManager.db.entity;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
+import android.os.UserHandleHidden;
 import android.util.Pair;
 
 import androidx.annotation.NonNull;
@@ -13,13 +14,12 @@ import androidx.core.content.pm.PackageInfoCompat;
 import androidx.room.ColumnInfo;
 import androidx.room.Entity;
 
-import java.io.File;
 import java.io.Serializable;
 import java.util.Objects;
 
-import io.github.muntashirakon.AppManager.backup.MetadataManager;
+import io.github.muntashirakon.AppManager.compat.ApplicationInfoCompat;
 import io.github.muntashirakon.AppManager.rules.compontents.ComponentUtils;
-import io.github.muntashirakon.AppManager.users.Users;
+import io.github.muntashirakon.AppManager.utils.FreezeUtils;
 import io.github.muntashirakon.AppManager.utils.Utils;
 
 @SuppressWarnings("NotNullFieldNotInitialized")
@@ -29,7 +29,7 @@ public class App implements Serializable {
     @NonNull
     public String packageName;
 
-    @ColumnInfo(name = "user_id", defaultValue = "" + Users.USER_NULL)
+    @ColumnInfo(name = "user_id", defaultValue = "" + UserHandleHidden.USER_NULL)
     public int userId;
 
     @ColumnInfo(name = "label")
@@ -69,6 +69,9 @@ public class App implements Serializable {
     @ColumnInfo(name = "is_installed", defaultValue = "true")
     public boolean isInstalled;
 
+    @ColumnInfo(name = "is_only_data_installed", defaultValue = "0")
+    public boolean isOnlyDataInstalled;
+
     @ColumnInfo(name = "is_enabled", defaultValue = "false")
     public boolean isEnabled;
 
@@ -78,39 +81,51 @@ public class App implements Serializable {
     @ColumnInfo(name = "has_splits", defaultValue = "false")
     public boolean hasSplits;
 
+    @ColumnInfo(name = "has_keystore", defaultValue = "false")
+    public boolean hasKeystore;
+
+    @ColumnInfo(name = "uses_saf", defaultValue = "false")
+    public boolean usesSaf;
+
+    @ColumnInfo(name = "ssaid", defaultValue = "")
+    public String ssaid;
+
+    @ColumnInfo(name = "code_size", defaultValue = "0")
+    public long codeSize;
+
+    @ColumnInfo(name = "data_size", defaultValue = "0")
+    public long dataSize;
+
+    @ColumnInfo(name = "mobile_data", defaultValue = "0")
+    public long mobileDataUsage;
+
+    @ColumnInfo(name = "wifi_data", defaultValue = "0")
+    public long wifiDataUsage;
+
     @ColumnInfo(name = "rules_count", defaultValue = "0")
     public int rulesCount;
 
     @ColumnInfo(name = "tracker_count", defaultValue = "0")
     public int trackerCount;
 
+    @ColumnInfo(name = "open_count", defaultValue = "0")
+    public int openCount;
+
+    @ColumnInfo(name = "screen_time", defaultValue = "0")
+    public long screenTime;
+
+    @ColumnInfo(name = "last_usage_time", defaultValue = "0")
+    public long lastUsageTime;
+
     @ColumnInfo(name = "last_action_time", defaultValue = "0")
     public long lastActionTime;
 
-    @NonNull
-    public static App fromApp(@NonNull App app) {
-        App newApp = new App();
-        newApp.packageName = app.packageName;
-        newApp.uid = app.uid;
-        newApp.userId = app.userId;
-        newApp.isInstalled = app.isInstalled;
-        newApp.flags = app.flags;
-        newApp.isEnabled = app.isEnabled;
-        newApp.packageLabel = app.packageLabel;
-        newApp.sdk = app.sdk;
-        newApp.versionName = app.versionName;
-        newApp.versionCode = app.versionCode;
-        newApp.sharedUserId = app.sharedUserId;
-        newApp.certName = app.certName;
-        newApp.certAlgo = app.certAlgo;
-        newApp.firstInstallTime = app.firstInstallTime;
-        newApp.lastUpdateTime = app.lastUpdateTime;
-        newApp.hasActivities = app.hasActivities;
-        newApp.hasSplits = app.hasSplits;
-        newApp.rulesCount = 0;
-        newApp.trackerCount = app.trackerCount;
-        newApp.lastActionTime = System.currentTimeMillis();
-        return newApp;
+    public boolean isSystemApp() {
+        return (flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+    }
+
+    public boolean isDebuggable() {
+        return (flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
     }
 
     @NonNull
@@ -119,12 +134,12 @@ public class App implements Serializable {
         ApplicationInfo applicationInfo = packageInfo.applicationInfo;
         app.packageName = applicationInfo.packageName;
         app.uid = applicationInfo.uid;
-        app.userId = Users.getUserId(app.uid);
-        app.isInstalled = (applicationInfo.flags & ApplicationInfo.FLAG_INSTALLED) != 0
-                && applicationInfo.publicSourceDir != null && new File(applicationInfo.publicSourceDir).exists();
+        app.userId = UserHandleHidden.getUserId(app.uid);
+        app.isInstalled = ApplicationInfoCompat.isInstalled(applicationInfo);
+        app.isOnlyDataInstalled = ApplicationInfoCompat.isOnlyDataInstalled(applicationInfo);
         app.flags = applicationInfo.flags;
-        app.isEnabled = applicationInfo.enabled;
-        app.packageLabel = applicationInfo.loadLabel(context.getPackageManager()).toString();
+        app.isEnabled = !FreezeUtils.isFrozen(applicationInfo);
+        app.packageLabel = ApplicationInfoCompat.loadLabelSafe(applicationInfo, context.getPackageManager()).toString();
         app.sdk = applicationInfo.targetSdkVersion;
         app.versionName = packageInfo.versionName;
         app.versionCode = PackageInfoCompat.getLongVersionCode(packageInfo);
@@ -137,36 +152,8 @@ public class App implements Serializable {
         app.hasActivities = packageInfo.activities != null;
         app.hasSplits = applicationInfo.splitSourceDirs != null;
         app.rulesCount = 0;
-        app.trackerCount = ComponentUtils.getTrackerComponentsForPackage(packageInfo).size();
+        app.trackerCount = ComponentUtils.getTrackerComponentsCountForPackage(packageInfo);
         app.lastActionTime = System.currentTimeMillis();
-        return app;
-    }
-
-    @NonNull
-    public static App fromBackupMetadata(@NonNull MetadataManager.Metadata metadata) {
-        App app = new App();
-        app.packageName = metadata.packageName;
-        app.uid = 0;
-        app.userId = metadata.userHandle;
-        app.isInstalled = false;
-        if (metadata.isSystem) {
-            app.flags |= ApplicationInfo.FLAG_SYSTEM;
-        }
-        app.isEnabled = true;
-        app.packageLabel = metadata.label;
-        app.sdk = 0;
-        app.versionName = metadata.versionName;
-        app.versionCode = metadata.versionCode;
-        app.sharedUserId = null;
-        app.certName = "";
-        app.certAlgo = "";
-        app.firstInstallTime = metadata.backupTime;
-        app.lastUpdateTime = metadata.backupTime;
-        app.hasActivities = false;
-        app.hasSplits = metadata.isSplitApk;
-        app.rulesCount = 0;
-        app.trackerCount = 0;
-        app.lastActionTime = metadata.backupTime;
         return app;
     }
 
@@ -177,6 +164,7 @@ public class App implements Serializable {
         app.uid = 0;
         app.userId = backup.userId;
         app.isInstalled = false;
+        app.isOnlyDataInstalled = false;
         if (backup.isSystem) {
             app.flags |= ApplicationInfo.FLAG_SYSTEM;
         }
@@ -195,6 +183,7 @@ public class App implements Serializable {
         app.rulesCount = 0;
         app.trackerCount = 0;
         app.lastActionTime = backup.backupTime;
+        app.hasKeystore = backup.hasKeyStore;
         return app;
     }
 
@@ -209,9 +198,5 @@ public class App implements Serializable {
     @Override
     public int hashCode() {
         return Objects.hash(packageName, userId);
-    }
-
-    public int getHashCode() {
-        return Objects.hash(packageName, userId, packageLabel, versionName, versionCode, flags, uid, sharedUserId, firstInstallTime, lastUpdateTime, sdk, certName, certAlgo, isInstalled, isEnabled, hasActivities, hasSplits, rulesCount, lastActionTime);
     }
 }

@@ -8,24 +8,25 @@ import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.annotation.DrawableRes;
 import androidx.annotation.IdRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.widget.LinearLayoutCompat;
-import com.google.android.material.button.MaterialButton;
+
 import io.github.muntashirakon.AppManager.R;
 
+// TODO: 2/7/23 Replace this with preferences
 public class ListItemCreator {
     private static final int EMPTY = -1;
 
     private final LinearLayoutCompat mListContainer;
     private final LayoutInflater mLayoutInflater;
 
-    public View list_item;
-    public TextView item_title;
-    public TextView item_subtitle;
-    public ImageView item_icon;
-    public MaterialButton item_open;
+    public View listItem;
+    public TextView itemTitle;
+    public TextView itemSubtitle;
+    public ImageView itemIcon;
 
     public ListItemCreator(@NonNull Activity activity, @IdRes int resIdMenuContainer) {
         mListContainer = activity.findViewById(resIdMenuContainer);
@@ -44,29 +45,29 @@ public class ListItemCreator {
     /**
      * Add a menu item to the main menu container.
      *
-     * @param title Title
-     * @param subtitle Subtitle (null to remove it)
+     * @param title     Title
+     * @param subtitle  Subtitle (null to remove it)
      * @param resIdIcon Resource ID for icon (ListItemCreator.EMPTY to leave it empty)
      * @return The menu item is returned which can be used for other purpose
      */
     private View addItemWithIconTitleSubtitle(@NonNull CharSequence title,
-                                              @Nullable CharSequence subtitle, int resIdIcon) {
-        list_item = mLayoutInflater.inflate(R.layout.item_icon_title_subtitle, mListContainer, false);
+                                              @Nullable CharSequence subtitle,
+                                              @DrawableRes int resIdIcon) {
+        listItem = mLayoutInflater.inflate(io.github.muntashirakon.ui.R.layout.m3_preference, mListContainer, false);
+        listItem.findViewById(R.id.icon_frame).setVisibility(View.GONE);
         // Item title
-        item_title = list_item.findViewById(R.id.item_title);
-        item_title.setText(title);
+        itemTitle = listItem.findViewById(android.R.id.title);
+        itemTitle.setText(title);
         // Item subtitle
-        item_subtitle = list_item.findViewById(R.id.item_subtitle);
-        if (subtitle != null) item_subtitle.setText(subtitle);
-        else item_subtitle.setVisibility(View.GONE);
+        itemSubtitle = listItem.findViewById(android.R.id.summary);
+        if (subtitle != null) itemSubtitle.setText(subtitle);
+        else itemSubtitle.setVisibility(View.GONE);
         // Item icon
-        item_icon = list_item.findViewById(R.id.item_icon);
-        if (resIdIcon != EMPTY) item_icon.setImageResource(resIdIcon);
-        // Remove open with button if not requested
-        item_open = list_item.findViewById(R.id.item_open);
-        item_open.setVisibility(View.GONE);
+        itemIcon = listItem.findViewById(android.R.id.icon);
+        if (resIdIcon != EMPTY) itemIcon.setImageResource(resIdIcon);
+        else itemIcon.setVisibility(View.GONE);
         // Add new menu to the container
-        mListContainer.addView(list_item);
-        return list_item;
+        mListContainer.addView(listItem);
+        return listItem;
     }
 }

@@ -2,10 +2,12 @@
 
 package io.github.muntashirakon.AppManager.runningapps;
 
+import android.app.AppOpsManager;
 import android.app.Application;
 import android.content.pm.ApplicationInfo;
 import android.os.Build;
 import android.os.RemoteException;
+import android.os.UserHandleHidden;
 import android.text.TextUtils;
 
 import androidx.annotation.AnyThread;
@@ -18,192 +20,324 @@ import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 
-import io.github.muntashirakon.AppManager.appops.AppOpsManager;
-import io.github.muntashirakon.AppManager.appops.AppOpsService;
+import io.github.muntashirakon.AppManager.compat.AppOpsManagerCompat;
+import io.github.muntashirakon.AppManager.compat.PackageManagerCompat;
+import io.github.muntashirakon.AppManager.logs.Log;
+import io.github.muntashirakon.AppManager.misc.AdvancedSearchView;
 import io.github.muntashirakon.AppManager.runner.Runner;
-import io.github.muntashirakon.AppManager.servermanager.PackageManagerCompat;
+import io.github.muntashirakon.AppManager.scanner.vt.VtFileReport;
+import io.github.muntashirakon.AppManager.scanner.vt.VtScanCoordinator;
+import io.github.muntashirakon.AppManager.scanner.vt.VtScanRepository;
+import io.github.muntashirakon.AppManager.db.entity.VtScanAttempt;
+import io.github.muntashirakon.AppManager.settings.FeatureController;
+import io.github.muntashirakon.AppManager.settings.Prefs;
 import io.github.muntashirakon.AppManager.types.UserPackagePair;
-import io.github.muntashirakon.AppManager.users.Users;
-import io.github.muntashirakon.AppManager.utils.AppPref;
 import io.github.muntashirakon.AppManager.utils.MultithreadedExecutor;
+import io.github.muntashirakon.io.Path;
+import io.github.muntashirakon.io.Paths;
+import io.github.muntashirakon.proc.ProcFs;
+import io.github.muntashirakon.proc.ProcMemoryInfo;
 
 public class RunningAppsViewModel extends AndroidViewModel {
     @RunningAppsActivity.SortOrder
-    private int sortOrder;
+    private int mSortOrder;
     @RunningAppsActivity.Filter
-    private int filter;
-    private final MultithreadedExecutor executor = MultithreadedExecutor.getNewInstance();
+    private int mFilter;
+    private final MultithreadedExecutor mExecutor = MultithreadedExecutor.getNewInstance();
+    private final VtScanCoordinator mVtCoordinator;
 
     public RunningAppsViewModel(@NonNull Application application) {
         super(application);
-        sortOrder = (int) AppPref.get(AppPref.PrefKey.PREF_RUNNING_APPS_SORT_ORDER_INT);
-        filter = (int) AppPref.get(AppPref.PrefKey.PREF_RUNNING_APPS_FILTER_FLAGS_INT);
+        mSortOrder = Prefs.RunningApps.getSortOrder();
+        mFilter = Prefs.RunningApps.getFilters();
+        mVtCoordinator = new VtScanCoordinator(application);
     }
 
     @Override
     protected void onCleared() {
-        executor.shutdownNow();
+        mExecutor.shutdownNow();
+        mVtCoordinator.close();
         super.onCleared();
     }
 
-    private MutableLiveData<List<ProcessItem>> processLiveData;
-
-    public LiveData<List<ProcessItem>> getProcessLiveData() {
-        if (processLiveData == null) {
-            processLiveData = new MutableLiveData<>();
-        }
-        return processLiveData;
+    public boolean isVirusTotalAvailable() {
+        return FeatureController.isVirusTotalEnabled();
     }
 
-    @NonNull
-    private final List<ProcessItem> processList = new ArrayList<>();
-    @NonNull
-    private final List<ProcessItem> filteredProcessList = new ArrayList<>();
+    // Null = Uploading, NonNull = Queued
+    private final MutableLiveData<Pair<ProcessItem, String>> mVtFileUpload = new MutableLiveData<>();
+    // Null = Failed, NonNull = Result generated
+    private final MutableLiveData<Pair<ProcessItem, VtFileReport>> mVtFileReport = new MutableLiveData<>();
+    private final Map<ProcessItem, VtScanAttempt> mPendingUploads = new HashMap<>();
+
+    public MutableLiveData<Pair<ProcessItem, VtFileReport>> getVtFileReport() {
+        return mVtFileReport;
+    }
+
+    public MutableLiveData<Pair<ProcessItem, String>> getVtFileUpload() {
+        return mVtFileUpload;
+    }
 
     @AnyThread
-    public void loadProcesses() {
-        executor.submit(() -> {
-            processList.clear();
-            processList.addAll(new ProcessParser().parse());
-            filterAndSort();
+    public void scanWithVt(@NonNull ProcessItem processItem) {
+        String file;
+        if (processItem instanceof AppProcessItem) {
+            file = ((AppProcessItem) processItem).packageInfo.applicationInfo.publicSourceDir;
+        } else file = processItem.getCommandlineArgs()[0];
+        if (!isVirusTotalAvailable() || file == null) {
+            mVtFileReport.postValue(new Pair<>(processItem, null));
+            return;
+        }
+        mExecutor.submit(() -> {
+            Path proxyFile = Paths.get(file);
+            if (!proxyFile.canRead()) {
+                mVtFileReport.postValue(new Pair<>(processItem, null));
+                return;
+            }
+            mVtCoordinator.scan(proxyFile, proxyFile.getUri().toString(), proxyFile.getName(),
+                    null, VtScanRepository.SOURCE_PROCESS_EXECUTABLE,
+                    new VtScanCoordinator.VtScanCallback() {
+                        @Override
+                        public void onConsentRequired(@NonNull VtScanAttempt attempt, @NonNull io.github.muntashirakon.AppManager.db.entity.VtFile ignored) {
+                            mPendingUploads.put(processItem, attempt);
+                            mVtFileUpload.postValue(new Pair<>(processItem, null));
+                        }
+
+                        @Override
+                        public void onQueued(@NonNull VtScanAttempt attempt) {
+                            mVtFileUpload.postValue(new Pair<>(processItem, ""));
+                        }
+
+                        @Override
+                        public void onCompleted(@NonNull VtFileReport report) {
+                            mVtFileReport.postValue(new Pair<>(processItem, report));
+                        }
+
+                        @Override
+                        public void onFailed(@Nullable String message) {
+                            mVtFileReport.postValue(new Pair<>(processItem, null));
+                        }
+                    });
         });
     }
 
-    private final MutableLiveData<Pair<ProcessItem, Boolean>> killProcessResult = new MutableLiveData<>();
-    private final MutableLiveData<List<ProcessItem>> killSelectedProcessesResult = new MutableLiveData<>();
+    @NonNull
+    private final MutableLiveData<List<ProcessItem>> mProcessLiveData = new MutableLiveData<>();
+
+    @NonNull
+    public LiveData<List<ProcessItem>> getProcessLiveData() {
+        return mProcessLiveData;
+    }
+
+    @NonNull
+    private final MutableLiveData<ProcessItem> mProcessItemLiveData = new MutableLiveData<>();
+
+    @NonNull
+    public LiveData<ProcessItem> observeProcessDetails() {
+        return mProcessItemLiveData;
+    }
+
+    @AnyThread
+    public void requestDisplayProcessDetails(@NonNull ProcessItem processItem) {
+        mProcessItemLiveData.postValue(processItem);
+    }
+
+    @NonNull
+    private final List<ProcessItem> mProcessList = new ArrayList<>();
+
+    @AnyThread
+    public void loadProcesses() {
+        mExecutor.submit(() -> {
+            synchronized (mProcessList) {
+                try {
+                    mProcessList.clear();
+                    mProcessList.addAll(new ProcessParser().parse());
+                    filterAndSort();
+                } catch (Throwable th) {
+                    Log.e("RunningApps", th);
+                }
+            }
+        });
+    }
+
+    @NonNull
+    private final MutableLiveData<ProcMemoryInfo> mDeviceMemoryInfo = new MutableLiveData<>();
+
+    @NonNull
+    public MutableLiveData<ProcMemoryInfo> getDeviceMemoryInfo() {
+        return mDeviceMemoryInfo;
+    }
+
+    @AnyThread
+    public void loadMemoryInfo() {
+        mExecutor.submit(() -> mDeviceMemoryInfo.postValue(ProcFs.getInstance().getMemoryInfo()));
+    }
+
+    private final MutableLiveData<Pair<ProcessItem, Boolean>> mKillProcessResult = new MutableLiveData<>();
+    private final MutableLiveData<List<ProcessItem>> mKillSelectedProcessesResult = new MutableLiveData<>();
 
     public void killProcess(ProcessItem processItem) {
-        executor.submit(() -> killProcessResult.postValue(new Pair<>(processItem, Runner.runCommand(
+        mExecutor.submit(() -> mKillProcessResult.postValue(new Pair<>(processItem, Runner.runCommand(
                 new String[]{"kill", "-9", String.valueOf(processItem.pid)}).isSuccessful())));
     }
 
     public LiveData<Pair<ProcessItem, Boolean>> observeKillProcess() {
-        return killProcessResult;
+        return mKillProcessResult;
     }
 
     public void killSelectedProcesses() {
-        executor.submit(() -> {
+        mExecutor.submit(() -> {
             List<ProcessItem> failedProcesses = new ArrayList<>();
-            for (ProcessItem processItem : selectedItems) {
+            for (ProcessItem processItem : mSelectedItems) {
                 if (!Runner.runCommand(new String[]{"kill", "-9", String.valueOf(processItem.pid)}).isSuccessful()) {
                     failedProcesses.add(processItem);
                 }
             }
-            killSelectedProcessesResult.postValue(failedProcesses);
+            mKillSelectedProcessesResult.postValue(failedProcesses);
         });
     }
 
     public LiveData<List<ProcessItem>> observeKillSelectedProcess() {
-        return killSelectedProcessesResult;
+        return mKillSelectedProcessesResult;
     }
 
-    private final MutableLiveData<Pair<ApplicationInfo, Boolean>> forceStopAppResult = new MutableLiveData<>();
+    private final MutableLiveData<Pair<ApplicationInfo, Boolean>> mForceStopAppResult = new MutableLiveData<>();
 
     public void forceStop(@NonNull ApplicationInfo info) {
-        executor.submit(() -> {
+        mExecutor.submit(() -> {
             try {
-                PackageManagerCompat.forceStopPackage(info.packageName, Users.getUserId(info.uid));
-                forceStopAppResult.postValue(new Pair<>(info, true));
-            } catch (RemoteException e) {
+                PackageManagerCompat.forceStopPackage(info.packageName, UserHandleHidden.getUserId(info.uid));
+                mForceStopAppResult.postValue(new Pair<>(info, true));
+            } catch (SecurityException e) {
                 e.printStackTrace();
-                forceStopAppResult.postValue(new Pair<>(info, false));
+                mForceStopAppResult.postValue(new Pair<>(info, false));
             }
         });
     }
 
     public LiveData<Pair<ApplicationInfo, Boolean>> observeForceStop() {
-        return forceStopAppResult;
+        return mForceStopAppResult;
     }
 
-    private final MutableLiveData<Pair<ApplicationInfo, Boolean>> preventBackgroundRunResult = new MutableLiveData<>();
+    private final MutableLiveData<Pair<ApplicationInfo, Boolean>> mPreventBackgroundRunResult = new MutableLiveData<>();
+
+    public boolean canRunInBackground(@NonNull ApplicationInfo info) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return true;
+        }
+        try {
+            AppOpsManagerCompat appOpsManager = new AppOpsManagerCompat();
+            boolean canRun;
+            {
+                int mode = appOpsManager.checkOperation(AppOpsManagerCompat.OP_RUN_IN_BACKGROUND, info.uid, info.packageName);
+                canRun = (mode != AppOpsManager.MODE_IGNORED && mode != AppOpsManager.MODE_ERRORED);
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                int mode = appOpsManager.checkOperation(AppOpsManagerCompat.OP_RUN_ANY_IN_BACKGROUND, info.uid, info.packageName);
+                canRun |= (mode != AppOpsManager.MODE_IGNORED && mode != AppOpsManager.MODE_ERRORED);
+            }
+            return canRun;
+        } catch (RemoteException | SecurityException e) {
+            return true;
+        }
+    }
 
     public void preventBackgroundRun(@NonNull ApplicationInfo info) {
-        executor.submit(() -> {
+        mExecutor.submit(() -> {
             try {
-                AppOpsService appOpsService = new AppOpsService();
+                AppOpsManagerCompat appOpsService = new AppOpsManagerCompat();
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    appOpsService.setMode(AppOpsManager.OP_RUN_IN_BACKGROUND, info.uid, info.packageName,
+                    appOpsService.setMode(AppOpsManagerCompat.OP_RUN_IN_BACKGROUND, info.uid, info.packageName,
                             AppOpsManager.MODE_IGNORED);
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    appOpsService.setMode(AppOpsManager.OP_RUN_ANY_IN_BACKGROUND, info.uid, info.packageName,
+                    appOpsService.setMode(AppOpsManagerCompat.OP_RUN_ANY_IN_BACKGROUND, info.uid, info.packageName,
                             AppOpsManager.MODE_IGNORED);
                 }
-                preventBackgroundRunResult.postValue(new Pair<>(info, true));
+                // TODO: 14/2/23 Store it to the rules
+                mPreventBackgroundRunResult.postValue(new Pair<>(info, true));
             } catch (RemoteException e) {
                 e.printStackTrace();
-                preventBackgroundRunResult.postValue(new Pair<>(info, false));
+                mPreventBackgroundRunResult.postValue(new Pair<>(info, false));
             }
         });
     }
 
     public LiveData<Pair<ApplicationInfo, Boolean>> observePreventBackgroundRun() {
-        return preventBackgroundRunResult;
+        return mPreventBackgroundRunResult;
     }
 
     public int getTotalCount() {
-        return processList.size();
+        return mProcessList.size();
     }
 
-    private String query;
+    private String mQuery;
+    @AdvancedSearchView.SearchType
+    private int mQueryType;
 
-    public void setQuery(@Nullable String query) {
-        this.query = query == null ? null : query.toLowerCase(Locale.ROOT);
-        executor.submit(this::filterAndSort);
+    public void setQuery(@Nullable String query, int searchType) {
+        if (query == null) {
+            mQuery = null;
+        } else if (searchType == AdvancedSearchView.SEARCH_TYPE_PREFIX) {
+            mQuery = query;
+        } else {
+            mQuery = query.toLowerCase(Locale.ROOT);
+        }
+        mQueryType = searchType;
+        mExecutor.submit(this::filterAndSort);
     }
 
     public String getQuery() {
-        return query;
+        return mQuery;
     }
 
     public void setSortOrder(int sortOrder) {
-        this.sortOrder = sortOrder;
-        AppPref.set(AppPref.PrefKey.PREF_RUNNING_APPS_SORT_ORDER_INT, this.sortOrder);
-        executor.submit(this::filterAndSort);
+        mSortOrder = sortOrder;
+        Prefs.RunningApps.setSortOrder(mSortOrder);
+        mExecutor.submit(this::filterAndSort);
     }
 
     public int getSortOrder() {
-        return sortOrder;
+        return mSortOrder;
     }
 
     public void addFilter(int filter) {
-        this.filter |= filter;
-        AppPref.set(AppPref.PrefKey.PREF_RUNNING_APPS_FILTER_FLAGS_INT, this.filter);
-        executor.submit(this::filterAndSort);
+        mFilter |= filter;
+        Prefs.RunningApps.setFilters(mFilter);
+        mExecutor.submit(this::filterAndSort);
     }
 
     public void removeFilter(int filter) {
-        this.filter &= ~filter;
-        AppPref.set(AppPref.PrefKey.PREF_RUNNING_APPS_FILTER_FLAGS_INT, this.filter);
-        executor.submit(this::filterAndSort);
+        mFilter &= ~filter;
+        Prefs.RunningApps.setFilters(mFilter);
+        mExecutor.submit(this::filterAndSort);
     }
 
     public int getFilter() {
-        return filter;
+        return mFilter;
     }
 
     @WorkerThread
     public void filterAndSort() {
-        filteredProcessList.clear();
+        List<ProcessItem> filteredProcessList = new ArrayList<>();
         // Apply filters
-        // There are 3 filters with “and” relations: query > apps > user apps
-        boolean hasQuery = !TextUtils.isEmpty(query);
-        boolean filterUserApps = (filter & RunningAppsActivity.FILTER_USER_APPS) != 0;
+        // There are 3 filters with “and” relations: apps > user apps > query
+        boolean filterUserApps = (mFilter & RunningAppsActivity.FILTER_USER_APPS) != 0;
         // If user apps filter is enabled, disable it since it'll be just an overhead
-        boolean filterApps = !filterUserApps && (filter & RunningAppsActivity.FILTER_APPS) != 0;
+        boolean filterApps = !filterUserApps && (mFilter & RunningAppsActivity.FILTER_APPS) != 0;
         ApplicationInfo info;
-        for (ProcessItem item : processList) {
-            // Filter by query
-            if (hasQuery && !item.name.toLowerCase(Locale.ROOT).contains(query)) {
-                continue;
-            }
+        for (ProcessItem item : mProcessList) {
             // Filter by apps
             if (filterApps && !(item instanceof AppProcessItem)) {
                 continue;
@@ -218,69 +352,142 @@ public class RunningAppsViewModel extends AndroidViewModel {
             }
             filteredProcessList.add(item);
         }
+        // Apply searching
+        if (!TextUtils.isEmpty(mQuery)) {
+            filteredProcessList = AdvancedSearchView.matches(mQuery, filteredProcessList,
+                    (AdvancedSearchView.ChoicesGenerator<ProcessItem>) item -> {
+                        if (item instanceof AppProcessItem) {
+                            return Arrays.asList(item.name.toLowerCase(Locale.getDefault()),
+                                    ((AppProcessItem) item).packageInfo.packageName.toLowerCase(Locale.getDefault()));
+                        }
+                        return Collections.singletonList(item.name.toLowerCase(Locale.getDefault()));
+                    }, mQueryType);
+        }
         // Apply sorts
         // Sort by pid first
         //noinspection ComparatorCombinators
         Collections.sort(filteredProcessList, (o1, o2) -> Integer.compare(o1.pid, o2.pid));
-        if (sortOrder != RunningAppsActivity.SORT_BY_PID) {
+        if (mSortOrder != RunningAppsActivity.SORT_BY_PID) {
             Collections.sort(filteredProcessList, (o1, o2) -> {
                 ProcessItem p1 = Objects.requireNonNull(o1);
                 ProcessItem p2 = Objects.requireNonNull(o2);
-                switch (sortOrder) {
+                switch (mSortOrder) {
                     case RunningAppsActivity.SORT_BY_APPS_FIRST:
                         return -Boolean.compare(p1 instanceof AppProcessItem, p2 instanceof AppProcessItem);
                     case RunningAppsActivity.SORT_BY_MEMORY_USAGE:
                         return -Long.compare(p1.rss, p2.rss);
                     case RunningAppsActivity.SORT_BY_PROCESS_NAME:
                         return p1.name.compareToIgnoreCase(p2.name);
+                    case RunningAppsActivity.SORT_BY_CPU_TIME:
+                        return -Long.compare(p1.getCpuTimeInMillis(), p1.getCpuTimeInMillis());
                     case RunningAppsActivity.SORT_BY_PID:
                     default:
                         return Integer.compare(p1.pid, p2.pid);
                 }
             });
         }
-        processLiveData.postValue(filteredProcessList);
+        mProcessLiveData.postValue(filteredProcessList);
     }
 
-    private final Set<ProcessItem> selectedItems = new HashSet<>();
+    private final Set<ProcessItem> mSelectedItems = new LinkedHashSet<>();
+
+    @Nullable
+    public ProcessItem getLastSelectedItem() {
+        // Last selected package is the same as the last added package.
+        Iterator<ProcessItem> it = mSelectedItems.iterator();
+        ProcessItem lastItem = null;
+        while (it.hasNext()) {
+            lastItem = it.next();
+        }
+        return lastItem;
+    }
 
     public int getSelectionCount() {
-        return selectedItems.size();
+        return mSelectedItems.size();
     }
 
     public boolean isSelected(@NonNull ProcessItem processItem) {
-        return selectedItems.contains(processItem);
+        return mSelectedItems.contains(processItem);
     }
 
     public void select(@Nullable ProcessItem processItem) {
         if (processItem != null) {
-            selectedItems.add(processItem);
+            mSelectedItems.add(processItem);
         }
     }
 
     public void deselect(@Nullable ProcessItem processItem) {
         if (processItem != null) {
-            selectedItems.remove(processItem);
+            mSelectedItems.remove(processItem);
         }
     }
 
     public ArrayList<ProcessItem> getSelections() {
-        return new ArrayList<>(selectedItems);
+        return new ArrayList<>(mSelectedItems);
     }
 
     @NonNull
     public ArrayList<UserPackagePair> getSelectedPackagesWithUsers() {
         ArrayList<UserPackagePair> userPackagePairs = new ArrayList<>();
-        for (ProcessItem processItem : selectedItems) {
+        for (ProcessItem processItem : mSelectedItems) {
             if (processItem instanceof AppProcessItem) {
                 ApplicationInfo applicationInfo = ((AppProcessItem) processItem).packageInfo.applicationInfo;
-                userPackagePairs.add(new UserPackagePair(applicationInfo.packageName, Users.getUserId(applicationInfo.uid)));
+                userPackagePairs.add(new UserPackagePair(applicationInfo.packageName,
+                        UserHandleHidden.getUserId(applicationInfo.uid)));
             }
         }
         return userPackagePairs;
     }
 
     public void clearSelections() {
-        selectedItems.clear();
+        mSelectedItems.clear();
+    }
+
+    public void enableUploading(@NonNull ProcessItem processItem) {
+        VtScanAttempt attempt = mPendingUploads.remove(processItem);
+        if (attempt == null) return;
+        mVtCoordinator.approve(attempt, new VtScanCoordinator.VtScanCallback() {
+            @Override
+            public void onConsentRequired(@NonNull VtScanAttempt a, @NonNull io.github.muntashirakon.AppManager.db.entity.VtFile f) {
+            }
+
+            @Override
+            public void onQueued(@NonNull VtScanAttempt a) {
+                mVtFileUpload.postValue(new Pair<>(processItem, ""));
+            }
+
+            @Override
+            public void onCompleted(@NonNull VtFileReport report) {
+                mVtFileReport.postValue(new Pair<>(processItem, report));
+            }
+
+            @Override
+            public void onFailed(@Nullable String message) {
+                mVtFileReport.postValue(new Pair<>(processItem, null));
+            }
+        });
+    }
+
+    public void disableUploading(@NonNull ProcessItem processItem) {
+        VtScanAttempt attempt = mPendingUploads.remove(processItem);
+        if (attempt == null) return;
+        mVtCoordinator.reject(attempt, new VtScanCoordinator.VtScanCallback() {
+            @Override
+            public void onConsentRequired(@NonNull VtScanAttempt a, @NonNull io.github.muntashirakon.AppManager.db.entity.VtFile f) {
+            }
+
+            @Override
+            public void onQueued(@NonNull VtScanAttempt a) {
+            }
+
+            @Override
+            public void onCompleted(@NonNull VtFileReport report) {
+            }
+
+            @Override
+            public void onFailed(@Nullable String message) {
+                mVtFileReport.postValue(new Pair<>(processItem, null));
+            }
+        });
     }
 }

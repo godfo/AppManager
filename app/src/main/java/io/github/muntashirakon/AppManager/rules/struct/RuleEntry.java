@@ -15,8 +15,8 @@ public abstract class RuleEntry {
 
     /**
      * Name of the entry, unique for {@link RuleType#ACTIVITY}, {@link RuleType#PROVIDER}, {@link RuleType#RECEIVER},
-     * {@link RuleType#SERVICE} and {@link RuleType#PERMISSION} but not others. In other cases, they can be
-     * {@link #STUB}.
+     * {@link RuleType#SERVICE}, {@link RuleType#PERMISSION}, {@link RuleType#MAGISK_DENY_LIST} but not others.
+     * In other cases, they can be {@link #STUB}.
      */
     @NonNull
     public final String name;
@@ -102,7 +102,9 @@ public abstract class RuleEntry {
             case PERMISSION:
                 return new PermissionRule(packageName, name, tokenizer);
             case MAGISK_HIDE:
-                return new MagiskHideRule(packageName, tokenizer);
+                return new MagiskHideRule(packageName, name, tokenizer);
+            case MAGISK_DENY_LIST:
+                return new MagiskDenyListRule(packageName, name, tokenizer);
             case BATTERY_OPT:
                 return new BatteryOptimizationRule(packageName, tokenizer);
             case NET_POLICY:
@@ -113,6 +115,8 @@ public abstract class RuleEntry {
                 return new UriGrantRule(packageName, tokenizer);
             case SSAID:
                 return new SsaidRule(packageName, tokenizer);
+            case FREEZE:
+                return new FreezeRule(packageName, tokenizer);
             default:
                 throw new IllegalArgumentException("Invalid type=" + type.name());
         }

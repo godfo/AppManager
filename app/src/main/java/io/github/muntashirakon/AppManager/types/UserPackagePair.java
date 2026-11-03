@@ -9,9 +9,11 @@ import android.os.Parcelable;
 import androidx.annotation.NonNull;
 import androidx.core.util.Pair;
 
+import java.util.Objects;
+
 public final class UserPackagePair extends Pair<String, Integer> implements Parcelable {
-    public UserPackagePair(String packageName, @UserIdInt int userHandle) {
-        super(packageName, userHandle);
+    public UserPackagePair(String packageName, @UserIdInt int userId) {
+        super(packageName, userId);
     }
 
     public String getPackageName() {
@@ -19,8 +21,21 @@ public final class UserPackagePair extends Pair<String, Integer> implements Parc
     }
 
     @UserIdInt
-    public int getUserHandle() {
+    public int getUserId() {
         return super.second;
+    }
+
+    @Override
+    public boolean equals(Object object) {
+        if (this == object) return true;
+        if (!(object instanceof Pair)) return false;
+        Pair<?, ?> other = (Pair<?, ?>) object;
+        return Objects.equals(first, other.first) && Objects.equals(second, other.second);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(getPackageName(), getUserId());
     }
 
     @NonNull
@@ -29,7 +44,7 @@ public final class UserPackagePair extends Pair<String, Integer> implements Parc
         return "(" + first + ", " + second + ")";
     }
 
-    protected UserPackagePair(@NonNull Parcel in) {
+    private UserPackagePair(@NonNull Parcel in) {
         super(in.readString(), in.readInt());
     }
 
@@ -55,6 +70,6 @@ public final class UserPackagePair extends Pair<String, Integer> implements Parc
     @Override
     public void writeToParcel(@NonNull Parcel dest, int flags) {
         dest.writeString(getPackageName());
-        dest.writeInt(getUserHandle());
+        dest.writeInt(getUserId());
     }
 }

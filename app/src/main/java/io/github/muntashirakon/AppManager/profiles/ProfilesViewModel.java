@@ -3,34 +3,66 @@
 package io.github.muntashirakon.AppManager.profiles;
 
 import android.app.Application;
-
-import java.util.HashMap;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.WorkerThread;
+import androidx.core.content.ContextCompat;
 import androidx.lifecycle.AndroidViewModel;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 
+import org.json.JSONException;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.concurrent.Future;
+
+import io.github.muntashirakon.AppManager.profiles.struct.BaseProfile;
+import io.github.muntashirakon.AppManager.utils.ThreadUtils;
+
 public class ProfilesViewModel extends AndroidViewModel {
+    private final MutableLiveData<HashMap<BaseProfile, CharSequence>> mProfilesLiveData = new MutableLiveData<>();
+    private final BroadcastReceiver mProfilesChangedReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            loadProfiles();
+        }
+    };
+    private Future<?> mProfileResult;
 
     public ProfilesViewModel(@NonNull Application application) {
         super(application);
+        ContextCompat.registerReceiver(application, mProfilesChangedReceiver,
+                new IntentFilter(ProfileManager.ACTION_PROFILES_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
-    private MutableLiveData<HashMap<String, String>> profileLiveData;
-
-    public LiveData<HashMap<String, String>> getProfiles() {
-        if (profileLiveData == null) {
-            profileLiveData = new MutableLiveData<>();
-            new Thread(this::loadProfiles).start();
-        }
-        return profileLiveData;
+    @Override
+    protected void onCleared() {
+        getApplication().unregisterReceiver(mProfilesChangedReceiver);
+        super.onCleared();
     }
 
-    @WorkerThread
+    public LiveData<HashMap<BaseProfile, CharSequence>> getProfilesLiveData() {
+        return mProfilesLiveData;
+    }
+
     public void loadProfiles() {
-        HashMap<String, String> profiles = ProfileManager.getProfiles();
-        profileLiveData.postValue(profiles);
+        if (mProfileResult != null) {
+            mProfileResult.cancel(true);
+        }
+        mProfileResult = ThreadUtils.postOnBackgroundThread(() -> {
+            synchronized (mProfilesLiveData) {
+                try {
+                    HashMap<BaseProfile, CharSequence> profiles = ProfileManager.getProfileSummaries(getApplication());
+                    mProfilesLiveData.postValue(profiles);
+                } catch (IOException | JSONException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
     }
 }

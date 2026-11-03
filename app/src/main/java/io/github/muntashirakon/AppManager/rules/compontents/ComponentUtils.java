@@ -3,11 +3,11 @@
 package io.github.muntashirakon.AppManager.rules.compontents;
 
 import android.annotation.UserIdInt;
+import android.app.AppOpsManager;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.net.Uri;
-import android.os.RemoteException;
 import android.util.Xml;
 
 import androidx.annotation.NonNull;
@@ -24,102 +24,99 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
-import io.github.muntashirakon.AppManager.AppManager;
 import io.github.muntashirakon.AppManager.StaticDataset;
-import io.github.muntashirakon.AppManager.appops.AppOpsManager;
-import io.github.muntashirakon.AppManager.appops.AppOpsService;
+import io.github.muntashirakon.AppManager.compat.AppOpsManagerCompat;
+import io.github.muntashirakon.AppManager.compat.PackageManagerCompat;
 import io.github.muntashirakon.AppManager.logs.Log;
-import io.github.muntashirakon.AppManager.oneclickops.ItemCount;
+import io.github.muntashirakon.AppManager.permission.PackageManagerPermissionController;
+import io.github.muntashirakon.AppManager.permission.PermissionOverrideManager;
 import io.github.muntashirakon.AppManager.rules.RuleType;
 import io.github.muntashirakon.AppManager.rules.RulesStorageManager;
 import io.github.muntashirakon.AppManager.rules.struct.AppOpRule;
 import io.github.muntashirakon.AppManager.rules.struct.ComponentRule;
 import io.github.muntashirakon.AppManager.rules.struct.PermissionRule;
 import io.github.muntashirakon.AppManager.rules.struct.RuleEntry;
-import io.github.muntashirakon.AppManager.servermanager.PermissionCompat;
 import io.github.muntashirakon.AppManager.types.UserPackagePair;
-import io.github.muntashirakon.AppManager.utils.FileUtils;
 import io.github.muntashirakon.AppManager.utils.PackageUtils;
 import io.github.muntashirakon.io.Path;
-import io.github.muntashirakon.io.ProxyFile;
-import io.github.muntashirakon.io.ProxyInputStream;
+import io.github.muntashirakon.io.Paths;
 
 public final class ComponentUtils {
+    public static final String TAG = ComponentUtils.class.getSimpleName();
+
     public static boolean isTracker(String componentName) {
-        for (String signature : StaticDataset.getTrackerCodeSignatures()) {
-            if (componentName.startsWith(signature) || componentName.contains(signature)) {
-                return true;
-            }
-        }
-        return false;
+        return StaticDataset.getSearchableTrackerSignatures().search(componentName).length > 0;
     }
 
-    @NonNull
-    public static HashMap<String, RuleType> getTrackerComponentsForPackage(PackageInfo packageInfo) {
-        HashMap<String, RuleType> trackers = new HashMap<>();
+    public static int getTrackerComponentsCountForPackage(PackageInfo packageInfo) {
         HashMap<String, RuleType> components = PackageUtils.collectComponentClassNames(packageInfo);
-        for (String componentName : components.keySet()) {
-            if (isTracker(componentName))
-                trackers.put(componentName, components.get(componentName));
-        }
-        return trackers;
+        return (int) components.keySet().stream()
+                .filter(ComponentUtils::isTracker)
+                .count();
     }
 
     @NonNull
-    public static HashMap<String, RuleType> getTrackerComponentsForPackage(String packageName, @UserIdInt int userHandle) {
-        HashMap<String, RuleType> trackers = new HashMap<>();
+    public static Map<String, RuleType> getTrackerComponentsForPackage(PackageInfo packageInfo) {
+        HashMap<String, RuleType> components = PackageUtils.collectComponentClassNames(packageInfo);
+        return components.entrySet().stream()
+                .filter(entry -> isTracker(entry.getKey()))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    @NonNull
+    public static Map<String, RuleType> getTrackerComponentsForPackage(String packageName, @UserIdInt int userHandle) {
         HashMap<String, RuleType> components = PackageUtils.collectComponentClassNames(packageName, userHandle);
-        for (String componentName : components.keySet()) {
-            if (isTracker(componentName))
-                trackers.put(componentName, components.get(componentName));
-        }
-        return trackers;
+        return components.entrySet().stream()
+                .filter(entry -> isTracker(entry.getKey()))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
-    @NonNull
-    public static HashMap<String, RuleType> getTrackerComponentsForPackageInfo(PackageInfo packageInfo) {
-        HashMap<String, RuleType> trackers = new HashMap<>();
-        HashMap<String, RuleType> components = PackageUtils.collectComponentClassNames(packageInfo);
-        for (String componentName : components.keySet()) {
-            if (isTracker(componentName))
-                trackers.put(componentName, components.get(componentName));
+    public static void blockTrackingComponents(@NonNull UserPackagePair pair) {
+        Map<String, RuleType> components = ComponentUtils.getTrackerComponentsForPackage(pair.getPackageName(), pair.getUserId());
+        try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(pair.getPackageName(), pair.getUserId())) {
+            for (String componentName : components.keySet()) {
+                cb.addComponent(componentName, Objects.requireNonNull(components.get(componentName)));
+            }
+            cb.applyRules(true);
         }
-        return trackers;
     }
 
     @WorkerThread
     @NonNull
     public static List<UserPackagePair> blockTrackingComponents(@NonNull Collection<UserPackagePair> userPackagePairs) {
         List<UserPackagePair> failedPkgList = new ArrayList<>();
-        HashMap<String, RuleType> components;
         for (UserPackagePair pair : userPackagePairs) {
-            components = ComponentUtils.getTrackerComponentsForPackage(pair.getPackageName(), pair.getUserHandle());
-            try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(pair.getPackageName(), pair.getUserHandle())) {
-                for (String componentName : components.keySet()) {
-                    cb.addComponent(componentName, components.get(componentName));
-                }
-                cb.applyRules(true);
+            try {
+                blockTrackingComponents(pair);
             } catch (Exception e) {
                 e.printStackTrace();
                 failedPkgList.add(pair);
             }
         }
         return failedPkgList;
+    }
+
+    public static void unblockTrackingComponents(@NonNull UserPackagePair pair) {
+        Map<String, RuleType> components = getTrackerComponentsForPackage(pair.getPackageName(), pair.getUserId());
+        try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(pair.getPackageName(), pair.getUserId())) {
+            for (String componentName : components.keySet()) {
+                cb.removeComponent(componentName);
+            }
+            cb.applyRules(true);
+        }
     }
 
     @WorkerThread
     @NonNull
     public static List<UserPackagePair> unblockTrackingComponents(@NonNull Collection<UserPackagePair> userPackagePairs) {
         List<UserPackagePair> failedPkgList = new ArrayList<>();
-        HashMap<String, RuleType> components;
         for (UserPackagePair pair : userPackagePairs) {
-            components = getTrackerComponentsForPackage(pair.getPackageName(), pair.getUserHandle());
-            try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(pair.getPackageName(), pair.getUserHandle())) {
-                for (String componentName : components.keySet()) {
-                    cb.removeComponent(componentName);
-                }
-                cb.applyRules(true);
+            try {
+                unblockTrackingComponents(pair);
             } catch (Exception e) {
                 e.printStackTrace();
                 failedPkgList.add(pair);
@@ -128,54 +125,24 @@ public final class ComponentUtils {
         return failedPkgList;
     }
 
-    @WorkerThread
-    @NonNull
-    public static List<UserPackagePair> blockFilteredComponents(@NonNull Collection<UserPackagePair> userPackagePairs, String[] signatures) {
-        List<UserPackagePair> failedPkgList = new ArrayList<>();
-        HashMap<String, RuleType> components;
-        for (UserPackagePair pair : userPackagePairs) {
-            components = PackageUtils.getFilteredComponents(pair.getPackageName(), pair.getUserHandle(), signatures);
-            try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(pair.getPackageName(), pair.getUserHandle())) {
-                for (String componentName : components.keySet()) {
-                    cb.addComponent(componentName, components.get(componentName));
-                }
-                cb.applyRules(true);
-            } catch (Exception e) {
-                e.printStackTrace();
-                failedPkgList.add(pair);
+    public static void blockFilteredComponents(@NonNull UserPackagePair pair, String[] signatures) {
+        HashMap<String, RuleType> components = PackageUtils.getFilteredComponents(pair.getPackageName(), pair.getUserId(), signatures);
+        try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(pair.getPackageName(), pair.getUserId())) {
+            for (String componentName : components.keySet()) {
+                cb.addComponent(componentName, Objects.requireNonNull(components.get(componentName)));
             }
+            cb.applyRules(true);
         }
-        return failedPkgList;
     }
 
-    @WorkerThread
-    @NonNull
-    public static List<UserPackagePair> unblockFilteredComponents(@NonNull Collection<UserPackagePair> userPackagePairs, String[] signatures) {
-        List<UserPackagePair> failedPkgList = new ArrayList<>();
-        HashMap<String, RuleType> components;
-        for (UserPackagePair pair : userPackagePairs) {
-            components = PackageUtils.getFilteredComponents(pair.getPackageName(), pair.getUserHandle(), signatures);
-            try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(pair.getPackageName(), pair.getUserHandle())) {
-                for (String componentName : components.keySet()) {
-                    cb.removeComponent(componentName);
-                }
-                cb.applyRules(true);
-            } catch (Exception e) {
-                e.printStackTrace();
-                failedPkgList.add(pair);
+    public static void unblockFilteredComponents(@NonNull UserPackagePair pair, String[] signatures) {
+        HashMap<String, RuleType> components = PackageUtils.getFilteredComponents(pair.getPackageName(), pair.getUserId(), signatures);
+        try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(pair.getPackageName(), pair.getUserId())) {
+            for (String componentName : components.keySet()) {
+                cb.removeComponent(componentName);
             }
+            cb.applyRules(true);
         }
-        return failedPkgList;
-    }
-
-    @NonNull
-    public static ItemCount getTrackerCountForApp(@NonNull PackageInfo packageInfo) {
-        PackageManager pm = AppManager.getContext().getPackageManager();
-        ItemCount trackerCount = new ItemCount();
-        trackerCount.packageName = packageInfo.packageName;
-        trackerCount.packageLabel = packageInfo.applicationInfo.loadLabel(pm).toString();
-        trackerCount.count = getTrackerComponentsForPackage(packageInfo).size();
-        return trackerCount;
     }
 
     public static void storeRules(@NonNull OutputStream os, @NonNull List<RuleEntry> rules, boolean isExternal)
@@ -186,18 +153,20 @@ public final class ComponentUtils {
     }
 
     @NonNull
-    public static List<String> getAllPackagesWithRules() {
+    public static List<String> getAllPackagesWithRules(@NonNull Context context) {
         List<String> packages = new ArrayList<>();
-        Path confDir = RulesStorageManager.getConfDir();
-        Uri[] names = confDir.list((dir, name) -> name.endsWith(".tsv"));
-        for (Uri name : names) {
-            packages.add(FileUtils.trimExtension(name.getLastPathSegment()));
+        Path confDir = RulesStorageManager.getConfDir(context);
+        Path[] paths = confDir.listFiles((dir, name) -> name.endsWith(".tsv"));
+        for (Path path : paths) {
+            packages.add(Paths.trimPathExtension(path.getUri().getLastPathSegment()));
         }
         return packages;
     }
 
     @WorkerThread
     public static void removeAllRules(@NonNull String packageName, int userHandle) {
+        // Reset overlays
+        PermissionOverrideManager.removeNow(packageName, userHandle);
         int uid = PackageUtils.getAppUid(new UserPackagePair(packageName, userHandle));
         try (ComponentsBlocker cb = ComponentsBlocker.getMutableInstance(packageName, userHandle)) {
             // Remove all blocking rules
@@ -206,12 +175,12 @@ public final class ComponentUtils {
             }
             cb.applyRules(true);
             // Reset configured app ops
-            AppOpsService appOpsService = new AppOpsService();
+            AppOpsManagerCompat appOpsManager = new AppOpsManagerCompat();
             try {
-                appOpsService.resetAllModes(userHandle, packageName);
+                appOpsManager.resetAllModes(userHandle, packageName);
                 for (AppOpRule entry : cb.getAll(AppOpRule.class)) {
                     try {
-                        appOpsService.setMode(entry.getOp(), uid, packageName, AppOpsManager.MODE_DEFAULT);
+                        appOpsManager.setMode(entry.getOp(), uid, packageName, AppOpsManager.MODE_DEFAULT);
                         cb.removeEntry(entry);
                     } catch (Exception e) {
                         e.printStackTrace();
@@ -221,12 +190,28 @@ public final class ComponentUtils {
                 e.printStackTrace();
             }
             // Grant configured permissions
+            PackageInfo packageInfo = null;
+            try {
+                packageInfo = PackageManagerCompat.getPackageInfo(packageName,
+                        PackageManager.GET_PERMISSIONS
+                                | PackageManagerCompat.MATCH_STATIC_SHARED_AND_SDK_LIBRARIES,
+                        userHandle);
+            } catch (Throwable e) {
+                Log.e(TAG, "Cannot resolve package %s for user %d", e, packageName, userHandle);
+            }
+            PackageManagerPermissionController permissionController =
+                    PackageManagerPermissionController.getInstance();
             for (PermissionRule entry : cb.getAll(PermissionRule.class)) {
                 try {
-                    PermissionCompat.grantPermission(packageName, entry.name, userHandle);
+                    if (packageInfo == null) {
+                        throw new IllegalStateException("Package is not installed for the user");
+                    }
+                    permissionController.setPlatformGranted(packageInfo, entry.name, userHandle,
+                            true);
                     cb.removeEntry(entry);
-                } catch (RemoteException e) {
-                    Log.e("ComponentUtils", "Cannot revoke permission " + entry.name + " for package " + packageName, e);
+                } catch (Throwable e) {
+                    Log.e(TAG, "Cannot grant permission %s for package %s", e, entry.name,
+                            packageName);
                 }
             }
         }
@@ -234,27 +219,25 @@ public final class ComponentUtils {
 
     @NonNull
     public static HashMap<String, RuleType> getIFWRulesForPackage(@NonNull String packageName) {
-        return getIFWRulesForPackage(packageName, ComponentsBlocker.SYSTEM_RULES_PATH);
+        return getIFWRulesForPackage(packageName, Paths.get(ComponentsBlocker.SYSTEM_RULES_PATH));
     }
 
     @VisibleForTesting
     @NonNull
-    public static HashMap<String, RuleType> getIFWRulesForPackage(@NonNull String packageName, @NonNull ProxyFile path) {
+    public static HashMap<String, RuleType> getIFWRulesForPackage(@NonNull String packageName, @NonNull Path path) {
         HashMap<String, RuleType> rules = new HashMap<>();
-        ProxyFile[] files = path.listFiles((dir, name) -> {
+        Path[] files = path.listFiles((dir, name) -> {
             // For our case, name must start with package name to support apps like Watt, Blocker and MyAndroidTools,
             // and to prevent unwanted situation, such as when the contains unsupported tags such as intent-filter.
             return name.startsWith(packageName) && name.endsWith(".xml");
         });
-        if (files != null) {
-            for (ProxyFile ifwRulesFile : files) {
-                // Get file contents
-                try (InputStream inputStream = new ProxyInputStream(ifwRulesFile)) {
-                    // Read rules
-                    rules.putAll(readIFWRules(inputStream, packageName));
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+        for (Path ifwRulesFile : files) {
+            // Get file contents
+            try (InputStream inputStream = ifwRulesFile.openInputStream()) {
+                // Read rules
+                rules.putAll(readIFWRules(inputStream, packageName));
+            } catch (IOException e) {
+                e.printStackTrace();
             }
         }
         return rules;

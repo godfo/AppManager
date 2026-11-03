@@ -1,71 +1,100 @@
-<?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-or-later -->
-<androidx.appcompat.widget.LinearLayoutCompat xmlns:android="http://schemas.android.com/apk/res/android"
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
+    style="@style/Widget.AppTheme.CardView.ListItem.Outlined"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
+    android:layout_marginHorizontal="?attr/listItemMarginHorizontal"
+    android:layout_marginVertical="?attr/listItemMarginVertical"
     android:focusable="true"
-    android:paddingStart="@dimen/padding_medium"
-    android:paddingTop="@dimen/padding_very_small"
-    android:paddingEnd="@dimen/padding_medium"
-    android:paddingBottom="@dimen/padding_very_small">
+    app:cardElevation="0dp">
 
     <androidx.appcompat.widget.LinearLayoutCompat
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:orientation="horizontal"
+        android:paddingHorizontal="?attr/listItemPaddingHorizontal"
+        android:paddingVertical="?attr/listItemPaddingVertical">
 
-        <androidx.appcompat.widget.AppCompatTextView
-            android:id="@+id/perm_name"
-            android:layout_width="match_parent"
+        <androidx.appcompat.widget.LinearLayoutCompat
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:textIsSelectable="true"
-            android:textColor="?android:attr/textColorPrimary"
-            android:textStyle="bold"
-            tools:text="android.permission.PERMISSION_NAME" />
+            android:layout_weight="1"
+            android:orientation="vertical">
 
-        <androidx.appcompat.widget.AppCompatTextView
-            android:id="@+id/perm_description"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="12sp"
-            tools:text="@tools:sample/lorem[10]" />
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/perm_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="?android:attr/textAppearanceListItem"
+                android:textIsSelectable="true"
+                tools:text="android.permission.A_VERY_LONG_PERMISSION_NAME" />
 
-        <androidx.appcompat.widget.AppCompatTextView
-            android:id="@+id/perm_protection_level"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="10sp"
-            tools:text="⚑ dangerous|instant"
-            tools:ignore="SmallSp" />
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/perm_description"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                tools:text="@tools:sample/lorem[10]" />
 
-        <androidx.appcompat.widget.AppCompatTextView
-            android:id="@+id/perm_package_name"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textIsSelectable="true"
-            android:textSize="12sp"
-            tools:text="Package Name: android" />
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/perm_protection_level"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:textSize="10sp"
+                tools:ignore="SmallSp"
+                tools:text="⚑ dangerous|instant" />
 
-        <androidx.appcompat.widget.AppCompatTextView
-            android:id="@+id/perm_group"
-            android:layout_width="match_parent"
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/perm_package_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:textIsSelectable="true"
+                tools:text="Package Name: android" />
+
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/perm_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:textIsSelectable="true"
+                tools:text="Group: android.permission-group.UNDEFINED" />
+
+        </androidx.appcompat.widget.LinearLayoutCompat>
+
+        <androidx.appcompat.widget.LinearLayoutCompat
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textIsSelectable="true"
-            android:textSize="12sp"
-            tools:text="Group: android.permission-group.UNDEFINED" />
+            android:layout_gravity="center"
+            android:layout_weight="0"
+            android:orientation="vertical">
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/perm_toggle_btn"
+                android:layout_width="56dp"
+                android:layout_height="wrap_content"
+                android:clickable="false"
+                android:focusable="false"
+                android:paddingVertical="@dimen/padding_medium" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/action_settings"
+                style="@style/Widget.AppTheme.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/view_in_settings"
+                android:paddingVertical="@dimen/padding_small"
+                android:visibility="gone"
+                app:icon="@drawable/ic_settings"
+                app:iconSize="20dp"
+                tools:visibility="visible" />
+
+        </androidx.appcompat.widget.LinearLayoutCompat>
 
     </androidx.appcompat.widget.LinearLayoutCompat>
 
-    <com.google.android.material.switchmaterial.SwitchMaterial
-        android:id="@+id/perm_toggle_btn"
-        android:layout_width="56dp"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center|center_horizontal|center_vertical"
-        android:layout_weight="0"
-        android:clickable="false"
-        android:focusable="false" />
-
-</androidx.appcompat.widget.LinearLayoutCompat>
+</com.google.android.material.card.MaterialCardView>

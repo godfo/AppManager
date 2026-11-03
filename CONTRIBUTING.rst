@@ -4,11 +4,22 @@
 Contributing
 ============
 
-You are welcome contribute to App Manager! This doesn't mean that you need
+You are welcome contribute to App Manager!  This doesn't mean that you need
 coding skills.  You can contribute to App Manager by creating helpful issues,
 attending discussions, improving documentations and translations, making icon
 for icon packs, adding unrecognised libraries or ad/tracking signatures,
 reviewing the source code, as well as reporting security vulnerabilities.
+
+AI-Generated Contributions
+==========================
+
+To maintain the legal integrity and clear provenance of App Manager's codebase
+under the GPL-3.0-or-later license, we DO NOT accept contributions that are
+generated, in whole part or in part, by Artificial Intelligence (AI) or Large
+Language Models (LLMs). All contributions MUST be the original work of the
+human author(s) submitting the pull or merge request. By submitting a pull or
+merge request, you affirm that the code was authored by you without the use of
+generative AI tools that produce functional code blocks.
 
 Rules
 =====
@@ -46,17 +57,25 @@ Rules
   We also support most of the `commit message conventions`_ from Linux.
 
   App Manager is a legal software and its contributions are protected by
-  copyright laws. Consider using real credentials i.e. real name and email as
+  copyright laws. Consider using real credentials ie. real name and email as
   we may be required to delete your valuable contributions in the event of
   introducing new license or adding exceptions to the existing license.
 
 **Note:** Repositories located in sites other than GitHub are currently
 considered mirrors and any pull or merge requests submitted there will not be
 accepted.  Instead, you can submit patches (as ``.patch`` files) via email
-attachment.  My email address is muntashirakon [at] riseup [dot] net.  Beware
+attachment.  My email address is am4android [at] riseup [dot] net.  Beware
 that such emails may be publicly accessible in future.  GitHub pull requests
 will be merged manually using the corresponding patches.  As a result, GitHub
 may falsely mark them *closed* instead of *merged*.
+
+**Warning.** Every commit made by other users are thoroughly examined with the
+exception of commits made through Weblate.  So, if it is found that you are
+abusing the Weblate platform, you will be blocked on Weblate without a warning,
+and ALL your contributions to this project shall be removed.  This is a hobby
+project, and like any hobby, I want to make things neat and clean.  Existing
+contributors are also encouraged to report any abuse.  Your identity shall be
+kept secret.
 
 .. _Linux documentations: https://github.com/torvalds/linux/blob/master/Documentation/process/license-rules.rst
 .. _commit message conventions: https://git.wiki.kernel.org/index.php/CommitMessageConventions

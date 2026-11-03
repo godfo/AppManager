@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-apply plugin: 'com.android.library'
+plugins {
+    id('com.android.library')
+}
 
 android {
-    compileSdkVersion rootProject.ext.compileSdk
-    buildToolsVersion rootProject.ext.buildTools
+    namespace 'io.github.muntashirakon.ui'
+    compileSdk compile_sdk
+    buildToolsVersion = build_tools
 
     defaultConfig {
-        minSdkVersion rootProject.ext.minSdk
-        targetSdkVersion rootProject.ext.targetSdk
-    }
+        minSdk min_sdk
+        targetSdk target_sdk
 
-    buildTypes {
-        preRelease {
-        }
+        consumerProguardFiles 'consumer-rules.pro'
     }
 
     compileOptions {
@@ -24,7 +24,11 @@ android {
 }
 
 dependencies {
-    implementation fileTree(dir: "libs", include: ["*.jar"])
-    implementation "androidx.appcompat:appcompat:${appcompat_version}"
-    implementation "com.google.android.material:material:${material_version}"
+    api "androidx.annotation:annotation:${annotation_version}"
+    api "androidx.appcompat:appcompat:${appcompat_version}"
+    api "com.google.android.material:material:${material_version}"
+    api "androidx.swiperefreshlayout:swiperefreshlayout:${swipe_refresh_version}"
+    api "androidx.preference:preference:${preferences_version}"
+    api "me.zhanghai.android.fastscroll:library:${fastscroll_version}"
+    api "com.leinardi.android:speed-dial:${speed_dial_version}"
 }

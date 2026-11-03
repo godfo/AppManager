@@ -2,27 +2,36 @@
 
 package android.os;
 
+import android.annotation.UserIdInt;
 import android.content.pm.UserInfo;
 
 import androidx.annotation.RequiresApi;
 
 import java.util.List;
 
+import misc.utils.HiddenUtil;
+
 public interface IUserManager extends IInterface {
     UserInfo getPrimaryUser() throws RemoteException;
 
+    /**
+     * @deprecated Replaced in API 29 (Android 10 r30) with {@link #getUsers(boolean, boolean, boolean)}
+     */
+    @Deprecated
     List<UserInfo> getUsers(boolean excludeDying) throws RemoteException;
 
     // Changed in 10.0.0_r30
-    @RequiresApi(api = Build.VERSION_CODES.Q)
+    @RequiresApi(Build.VERSION_CODES.Q)
     List<UserInfo> getUsers(boolean excludePartial, boolean excludeDying, boolean excludePreCreated)
             throws RemoteException;
 
-    int getManagedProfileBadge(int userId) throws RemoteException;
+    List<UserInfo> getProfiles(@UserIdInt int userId, boolean enabledOnly);
+
+    boolean hasUserRestriction(String restrictionKey, int userHandle) throws RemoteException;
 
     abstract class Stub {
         public static IUserManager asInterface(android.os.IBinder obj) {
-            throw new UnsupportedOperationException();
+            return HiddenUtil.throwUOE(obj);
         }
     }
 }

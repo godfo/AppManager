@@ -2,17 +2,20 @@
 
 package io.github.muntashirakon.AppManager.intercept;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
+import android.os.BadParcelableException;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.RemoteException;
+import android.os.UserHandleHidden;
 import android.text.Editable;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -22,49 +25,77 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.ActionBar;
-import androidx.appcompat.widget.ShareActionProvider;
+import androidx.collection.LruCache;
 import androidx.collection.SparseArrayCompat;
-import androidx.core.util.Pair;
-import androidx.core.view.MenuItemCompat;
-import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.DiffUtil;
+import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.android.internal.util.TextUtils;
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.textfield.MaterialAutoCompleteTextView;
+import com.google.android.material.checkbox.MaterialCheckBox;
+import com.google.android.material.textfield.TextInputEditText;
+import com.google.android.material.textfield.TextInputLayout;
 
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
-import java.util.Set;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.StringTokenizer;
+import java.util.UUID;
 
 import io.github.muntashirakon.AppManager.BaseActivity;
 import io.github.muntashirakon.AppManager.BuildConfig;
 import io.github.muntashirakon.AppManager.R;
-import io.github.muntashirakon.AppManager.imagecache.ImageLoader;
+import io.github.muntashirakon.AppManager.compat.ActivityManagerCompat;
+import io.github.muntashirakon.AppManager.compat.IntegerCompat;
+import io.github.muntashirakon.AppManager.compat.ManifestCompat;
+import io.github.muntashirakon.AppManager.compat.PackageManagerCompat;
+import io.github.muntashirakon.AppManager.crypto.auth.AuthManager;
+import io.github.muntashirakon.AppManager.ipc.LocalServices;
 import io.github.muntashirakon.AppManager.logs.Log;
-import io.github.muntashirakon.AppManager.types.TextInputDropdownDialogBuilder;
+import io.github.muntashirakon.AppManager.runner.RunnerUtils;
+import io.github.muntashirakon.AppManager.self.SelfPermissions;
+import io.github.muntashirakon.AppManager.self.imagecache.ImageLoader;
+import io.github.muntashirakon.AppManager.settings.Ops;
+import io.github.muntashirakon.AppManager.shortcut.CreateShortcutDialogFragment;
+import io.github.muntashirakon.AppManager.utils.ClipboardUtils;
+import io.github.muntashirakon.AppManager.utils.ThreadUtils;
 import io.github.muntashirakon.AppManager.utils.PackageUtils;
 import io.github.muntashirakon.AppManager.utils.UIUtils;
+import io.github.muntashirakon.AppManager.utils.Utils;
+import io.github.muntashirakon.dialog.TextInputDropdownDialogBuilder;
+import io.github.muntashirakon.util.UiUtils;
+import io.github.muntashirakon.widget.MaterialAutoCompleteTextView;
 
+// Copyright 2020 Muntashir Al-Islam
+// Copyright 2017 k3b
 // Copyright 2012 Intrications
 public class ActivityInterceptor extends BaseActivity {
     public static final String TAG = ActivityInterceptor.class.getSimpleName();
+    public static final String ALIAS_BROWSER = BuildConfig.APPLICATION_ID + ".intercept.BrowserInterceptor";
 
     public static final String EXTRA_PACKAGE_NAME = BuildConfig.APPLICATION_ID + ".intent.extra.PACKAGE_NAME";
     public static final String EXTRA_CLASS_NAME = BuildConfig.APPLICATION_ID + ".intent.extra.CLASS_NAME";
+    public static final String EXTRA_ACTION = BuildConfig.APPLICATION_ID + ".intent.extra.ACTION";
+    // TODO(29/8/21): Enable getting activity result for activities launched with root
+    public static final String EXTRA_ROOT = BuildConfig.APPLICATION_ID + ".intent.extra.ROOT";
+    // Root only
+    public static final String EXTRA_USER_HANDLE = BuildConfig.APPLICATION_ID + ".intent.extra.USER_HANDLE";
+    // Whether to trigger the Intent on startup, requires `auth` parameter to be set
+    public static final String EXTRA_TRIGGER_ON_START = BuildConfig.APPLICATION_ID + ".intent.extra.TRIGGER_ON_START";
+    public static final String EXTRA_AUTH = BuildConfig.APPLICATION_ID + ".intent.extra.AUTH";
 
     private static final String INTENT_EDITED = "intent_edited";
-    private static final String NEWLINE = "\n";
-    private static final String BLANK = " ";
 
     private static final SparseArrayCompat<String> INTENT_FLAG_TO_STRING = new SparseArrayCompat<String>() {
         {
@@ -193,32 +224,24 @@ public class ActivityInterceptor extends BaseActivity {
         }
     };
 
-    private static final String NEWSEGMENT = NEWLINE + "------------" + NEWLINE;
-
-    private static final String BOLD_START = "<b><u>";
-    private static final String BOLD_END_BLANK = "</u></b>" + BLANK;
-    private static final String BOLD_END_NL = "</u></b>" + NEWLINE;
-
     private abstract class IntentUpdateTextWatcher implements TextWatcher {
-        private final TextView textView;
+        private final TextView mTextView;
 
         IntentUpdateTextWatcher(TextView textView) {
-            this.textView = textView;
+            mTextView = textView;
         }
 
         @Override
-        public void onTextChanged(CharSequence s, int start, int before,
-                                  int count) {
-            if (areTextWatchersActive) {
+        public void onTextChanged(CharSequence s, int start, int before, int count) {
+            if (mAreTextWatchersActive) {
                 try {
-                    String modifiedContent = textView.getText().toString();
+                    String modifiedContent = mTextView.getText().toString();
                     onUpdateIntent(modifiedContent);
-                    showTextViewIntentData(textView);
+                    showTextViewIntentData(mTextView);
                     showResetIntentButton(true);
                     refreshUI();
                 } catch (Exception e) {
-                    Toast.makeText(ActivityInterceptor.this, e.getMessage(),
-                            Toast.LENGTH_SHORT).show();
+                    UIUtils.displayShortToast(e.getMessage());
                     e.printStackTrace();
                 }
             }
@@ -227,8 +250,7 @@ public class ActivityInterceptor extends BaseActivity {
         abstract protected void onUpdateIntent(String modifiedContent);
 
         @Override
-        public void beforeTextChanged(CharSequence s, int start, int count,
-                                      int after) {
+        public void beforeTextChanged(CharSequence s, int start, int count, int after) {
         }
 
         @Override
@@ -236,58 +258,67 @@ public class ActivityInterceptor extends BaseActivity {
         }
     }
 
-    private ShareActionProvider shareActionProvider;
+    private MaterialAutoCompleteTextView mActionView;
+    private MaterialAutoCompleteTextView mDataView;
+    private MaterialAutoCompleteTextView mTypeView;
+    private MaterialAutoCompleteTextView mUriView;
+    private MaterialAutoCompleteTextView mPackageNameView;
+    private MaterialAutoCompleteTextView mClassNameView;
+    private TextInputEditText mIdView;
+    private TextInputEditText mUserIdEdit;
 
-    private MaterialAutoCompleteTextView action;
-    private MaterialAutoCompleteTextView data;
-    private MaterialAutoCompleteTextView type;
-    private MaterialAutoCompleteTextView uri;
+    @Nullable
+    private HistoryEditText mHistory;
 
-    private HistoryEditText mHistory = null;
-
-    private CategoriesRecyclerViewAdapter categoriesAdapter;
-    private FlagsRecyclerViewAdapter flagsAdapter;
-    private ExtrasRecyclerViewAdapter extrasAdapter;
-    private TextView activitiesHeader;
-    private MatchingActivitiesRecyclerViewAdapter matchingActivitiesAdapter;
-    private Button resendIntentButton;
-    private Button resetIntentButton;
+    private CategoriesRecyclerViewAdapter mCategoriesAdapter;
+    private FlagsRecyclerViewAdapter mFlagsAdapter;
+    private ExtrasRecyclerViewAdapter mExtrasAdapter;
+    private MatchingActivitiesRecyclerViewAdapter mMatchingActivitiesAdapter;
+    private TextView mActivitiesHeader;
+    private Button mResendIntentButton;
+    private Button mResetIntentButton;
 
     /**
      * String representation of intent as URI
      */
-    private String originalIntent;
-
+    @Nullable
+    private String mOriginalIntent;
     /**
      * Extras that are lost during intent to string conversion
      */
-    private Bundle additionalExtras;
+    @Nullable
+    private Bundle mAdditionalExtras;
+    @Nullable
+    private Intent mMutableIntent;
+    @Nullable
+    private ComponentName mRequestedComponent;
 
-    private Intent mutableIntent;
+    private boolean mUseRoot;
+    @Nullable
+    private MaterialCheckBox mUseRootCheckBox;
+    private int mUserHandle;
 
     @Nullable
-    private ComponentName requestedComponent;
+    private Integer mLastResultCode = null;
+    @Nullable
+    private Intent mLastResultIntent = null;
 
-    private Integer lastResultCode = null;
-    private Intent lastResultIntent = null;
+    private final LruCache<String, CharSequence> mPackageLabelMap = new LruCache<>(16);
 
-    private boolean areTextWatchersActive;
+    private volatile boolean mAreTextWatchersActive;
 
-    private final ImageLoader imageLoader = new ImageLoader();
-    private final ActivityResultLauncher<Intent> launcher = registerForActivityResult(
+    private final ActivityResultLauncher<Intent> mIntentLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(), result -> {
                 Intent data = result.getData();
-                this.lastResultCode = result.getResultCode();
-                this.lastResultIntent = result.getData();
+                mLastResultCode = result.getResultCode();
+                mLastResultIntent = result.getData();
 
                 // Forward the result of the activity to the caller activity
                 setResult(result.getResultCode(), data);
 
                 refreshUI();
                 Uri uri = data == null ? null : data.getData();
-                Toast.makeText(ActivityInterceptor.this,
-                        String.format("%s: (%s)", getString(R.string.activity_result), uri),
-                        Toast.LENGTH_LONG).show();
+                UIUtils.displayLongToast("%s: (%s)", getString(R.string.activity_result), uri);
             });
 
     @Override
@@ -296,136 +327,207 @@ public class ActivityInterceptor extends BaseActivity {
         setSupportActionBar(findViewById(R.id.toolbar));
         findViewById(R.id.progress_linear).setVisibility(View.GONE);
         // Get Intent
-        Intent intent = getIntent();
+        Intent intent = new Intent(getIntent());
+        mUseRoot = Ops.isWorkingUidRoot() && intent.getBooleanExtra(EXTRA_ROOT, false);
+        mUserHandle = intent.getIntExtra(EXTRA_USER_HANDLE, UserHandleHidden.myUserId());
+        intent.removeExtra(EXTRA_ROOT);
+        intent.removeExtra(EXTRA_USER_HANDLE);
+        intent.setPackage(null);
+        intent.setComponent(null);
         // Get ComponentName if set
-        String pkgName = null;
-        String className = null;
+        String pkgName;
         if (intent.hasExtra(EXTRA_PACKAGE_NAME)) {
             pkgName = intent.getStringExtra(EXTRA_PACKAGE_NAME);
             intent.removeExtra(EXTRA_PACKAGE_NAME);
-        }
+            intent.setPackage(pkgName);
+            updateTitle(pkgName);
+        } else pkgName = null;
         if (intent.hasExtra(EXTRA_CLASS_NAME)) {
+            String className;
             className = intent.getStringExtra(EXTRA_CLASS_NAME);
             intent.removeExtra(EXTRA_CLASS_NAME);
-        }
-        if (pkgName != null && className != null) {
-            requestedComponent = new ComponentName(pkgName, className);
-            ActionBar actionBar = getSupportActionBar();
-            if (actionBar != null) {
-                PackageManager pm = getPackageManager();
-                actionBar.setTitle(PackageUtils.getPackageLabel(pm, pkgName));
-                try {
-                    ActivityInfo info = pm.getActivityInfo(requestedComponent, 0);
-                    actionBar.setSubtitle(info.loadLabel(pm));
-                } catch (PackageManager.NameNotFoundException e) {
-                    actionBar.setSubtitle(className);
-                }
+            if (pkgName != null && className != null) {
+                mRequestedComponent = new ComponentName(pkgName, className);
+                intent.setComponent(mRequestedComponent);
+                updateSubtitle(mRequestedComponent);
             }
         }
-        // Store the Intent
-        storeOriginalIntent(intent);
+        String action = intent.getStringExtra(EXTRA_ACTION);
+        if (action != null) {
+            intent.setAction(action);
+        }
+        // For shortcut/startup trigger: Need authorization to prevent abuse
+        if (intent.getBooleanExtra(EXTRA_TRIGGER_ON_START, false)
+                && AuthManager.getKey().equals(intent.getStringExtra(EXTRA_AUTH))) {
+            intent.removeExtra(EXTRA_TRIGGER_ON_START);
+            intent.removeExtra(EXTRA_AUTH);
+            // Trigger intent
+            launchIntent(intent, mRequestedComponent == null);
+            // Fall-through
+        }
         // Whether the Intent was edited
         final boolean isVisible = savedInstanceState != null && savedInstanceState.getBoolean(INTENT_EDITED);
+        init(intent, isVisible);
+    }
+
+    private void init(@NonNull Intent intent, boolean isEdited) {
+        // Store the Intent
+        storeOriginalIntent(intent);
         // Load Intent data
-        showInitialIntent(isVisible);
+        showInitialIntent(isEdited);
         // Save Intent data to history
-        if (mHistory != null && requestedComponent == null) mHistory.saveHistory();
+        if (mHistory != null && mRequestedComponent == null) {
+            mHistory.saveHistory();
+        }
     }
 
-    @Override
-    protected void onDestroy() {
-        imageLoader.close();
-        super.onDestroy();
-    }
-
-    private void storeOriginalIntent(Intent intent) {
+    private void storeOriginalIntent(@NonNull Intent intent) {
         // Store original intent as URI string
-        this.originalIntent = getUri(intent);
+        mOriginalIntent = getUri(intent);
         // Get a new intent from the URI
-        Intent copy = cloneIntent(this.originalIntent);
+        Intent copyIntent = cloneIntent(mOriginalIntent);
         // Store extras that are not available in the URI
-        final Bundle originalExtras = intent.getExtras();
-        if (originalExtras != null) {
-            Bundle additionalExtrasBundle = new Bundle(originalExtras);
-            for (String key : originalExtras.keySet()) {
-                if (copy.hasExtra(key)) {
-                    additionalExtrasBundle.remove(key);
-                }
+        Bundle originalExtras = intent.getExtras();
+        if (copyIntent == null || originalExtras == null) {
+            return;
+        }
+        Bundle additionalExtrasBundle = new Bundle(originalExtras);
+        for (String key : originalExtras.keySet()) {
+            if (copyIntent.hasExtra(key)) {
+                additionalExtrasBundle.remove(key);
             }
-            if (!additionalExtrasBundle.isEmpty()) {
-                additionalExtras = additionalExtrasBundle;
-            }
+        }
+        if (!additionalExtrasBundle.isEmpty()) {
+            mAdditionalExtras = additionalExtrasBundle;
         }
     }
 
     /**
-     * creates a clone of originalIntent and displays it for editing
+     * Create a clone of the original Intent and display it for editing
      */
     private void showInitialIntent(boolean isVisible) {
-        mutableIntent = cloneIntent(this.originalIntent);
-
-        mutableIntent.setComponent(null);
-
+        // Copy a mutable version of the intent
+        mMutableIntent = cloneIntent(mOriginalIntent);
+        // Setup views
         setupVariables();
-
+        // Setup watchers to watch and update changes
         setupTextWatchers();
-
+        // Display intent data
         showAllIntentData(null);
-
+        // Display reset button if the intent was modified
         showResetIntentButton(isVisible);
     }
 
     /**
-     * textViewToIgnore is not updated so current selected char in that textview will not change
+     * @param textViewToIgnore The {@link TextView} which should not be updated.
      */
-    private void showAllIntentData(TextView textViewToIgnore) {
+    private void showAllIntentData(@Nullable TextView textViewToIgnore) {
         showTextViewIntentData(textViewToIgnore);
-
         // Display categories
-        Set<String> categories = mutableIntent.getCategories();
-        categoriesAdapter.setDefaultList(categories);
-
+        mCategoriesAdapter.setDefaultList(mMutableIntent != null ? mMutableIntent.getCategories() : null);
         // Display flags
-        ArrayList<String> flagsStrings = getFlags();
-        flagsAdapter.setDefaultList(flagsStrings);
-
+        mFlagsAdapter.setDefaultList(getFlags());
         // Display extras
-        extrasAdapter.setDefaultList(getExtras());
+        mExtrasAdapter.setDefaultList(getExtras());
         refreshUI();
     }
 
-    @NonNull
-    private List<Pair<String, Object>> getExtras() {
-        List<Pair<String, Object>> extras = new ArrayList<>();
-        Bundle intentBundle = mutableIntent.getExtras();
-        if (intentBundle != null) {
-            for (String extraKey : intentBundle.keySet()) {
-                Object extraValue = intentBundle.get(extraKey);
-                if (extraValue == null) continue;
-                extras.add(new Pair<>(extraKey, extraValue));
+    private void updateTitle(@Nullable String packageName) {
+        ActionBar actionBar = getSupportActionBar();
+        if (actionBar != null) {
+            if (packageName != null) {
+                CharSequence label = mPackageLabelMap.get(packageName);
+                if (label != null) {
+                    actionBar.setTitle(label);
+                } else {
+                    // Need to load the label
+                    ThreadUtils.postOnBackgroundThread(() -> {
+                        CharSequence appLabel = PackageUtils.getPackageLabel(getPackageManager(), packageName, mUserHandle);
+                        ThreadUtils.postOnMainThread(() -> {
+                            if (packageName.equals(appLabel.toString())) {
+                                // Ignore labels named after their package names
+                                actionBar.setTitle(R.string.interceptor);
+                                return;
+                            }
+                            actionBar.setTitle(appLabel);
+                            mPackageLabelMap.put(packageName, appLabel);
+                        });
+                    });
+                }
+            } else actionBar.setTitle(R.string.interceptor);
+        }
+    }
+
+    private void updateSubtitle(@Nullable ComponentName cn) {
+        ActionBar actionBar = getSupportActionBar();
+        if (actionBar != null) {
+            if (cn == null) {
+                actionBar.setSubtitle(null);
+                return;
+            }
+            PackageManager pm = getPackageManager();
+            try {
+                // Load label for the given user
+                ActivityInfo info = pm.getActivityInfo(cn, 0);
+                actionBar.setSubtitle(info.loadLabel(pm));
+            } catch (PackageManager.NameNotFoundException e) {
+                actionBar.setSubtitle(cn.getClassName());
             }
         }
-        return extras;
+    }
+
+    @Nullable
+    private Bundle getExtras() {
+        if (mMutableIntent != null) {
+            return mMutableIntent.getExtras();
+        }
+        return null;
     }
 
     /**
-     * textViewToIgnore is not updated so current selected char in that textview will not change
+     * @param textViewToIgnore The {@link TextView} which should not be updated.
      */
-    private void showTextViewIntentData(TextView textViewToIgnore) {
-        areTextWatchersActive = false;
-        if (textViewToIgnore != action) action.setText(mutableIntent.getAction());
-        if ((textViewToIgnore != data) && (mutableIntent.getDataString() != null)) {
-            data.setText(mutableIntent.getDataString());
+    private void showTextViewIntentData(@Nullable TextView textViewToIgnore) {
+        if (mMutableIntent == null) return;
+        // Disable text watchers temporarily to prevent triggering modifications
+        mAreTextWatchersActive = false;
+        try {
+            if (textViewToIgnore != mActionView) {
+                mActionView.setText(mMutableIntent.getAction());
+            }
+            if (textViewToIgnore != mDataView && mMutableIntent.getDataString() != null) {
+                mDataView.setText(mMutableIntent.getDataString());
+            }
+            if (textViewToIgnore != mTypeView) {
+                mTypeView.setText(mMutableIntent.getType());
+            }
+            if (textViewToIgnore != mPackageNameView) {
+                mPackageNameView.setText(mMutableIntent.getPackage());
+            }
+            if (textViewToIgnore != mClassNameView) {
+                ComponentName cn = mMutableIntent.getComponent();
+                mClassNameView.setText(cn != null ? cn.getClassName() : null);
+            }
+            if (textViewToIgnore != mUriView) {
+                mUriView.setText(getUri(mMutableIntent));
+            }
+            if (textViewToIgnore != mIdView) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    mIdView.setText(mMutableIntent.getIdentifier());
+                }
+            }
+        } finally {
+            mAreTextWatchersActive = true;
         }
-        if (textViewToIgnore != type) type.setText(mutableIntent.getType());
-        if (textViewToIgnore != uri) uri.setText(getUri(mutableIntent));
-        areTextWatchersActive = true;
     }
 
     @NonNull
-    private ArrayList<String> getFlags() {
+    private List<String> getFlags() {
+        if (mMutableIntent == null) {
+            return Collections.emptyList();
+        }
+        int flags = mMutableIntent.getFlags();
         ArrayList<String> flagsStrings = new ArrayList<>();
-        int flags = mutableIntent.getFlags();
         for (int i = 0; i < INTENT_FLAG_TO_STRING.size(); ++i) {
             if ((flags & INTENT_FLAG_TO_STRING.keyAt(i)) != 0) {
                 flagsStrings.add(INTENT_FLAG_TO_STRING.valueAt(i));
@@ -435,87 +537,138 @@ public class ActivityInterceptor extends BaseActivity {
     }
 
     private void checkAndShowMatchingActivities() {
-        if (mutableIntent == null) {
-            // For whatever reason, mutable intent is null
-            return;
-        }
-        PackageManager pm = getPackageManager();
-        List<ResolveInfo> resolveInfo = pm.queryIntentActivities(mutableIntent, 0);
-        if (resolveInfo.size() < 1) {
-            resendIntentButton.setEnabled(false);
-            activitiesHeader.setVisibility(View.GONE);
+        if (mMutableIntent == null) return;
+        List<ResolveInfo> resolveInfo = getMatchingActivities();
+        if (resolveInfo.isEmpty()) {
+            mResendIntentButton.setEnabled(false);
+            mActivitiesHeader.setVisibility(View.GONE);
         } else {
-            resendIntentButton.setEnabled(true);
-            activitiesHeader.setVisibility(View.VISIBLE);
+            mResendIntentButton.setEnabled(true);
+            mActivitiesHeader.setVisibility(View.VISIBLE);
         }
-        activitiesHeader.setText(getString(R.string.matching_activities));
-        matchingActivitiesAdapter.setDefaultList(resolveInfo);
+        mActivitiesHeader.setText(getString(R.string.matching_activities));
+        mMatchingActivitiesAdapter.setDefaultList(resolveInfo);
+    }
+
+    @NonNull
+    private List<ResolveInfo> getMatchingActivities() {
+        if (mMutableIntent == null) {
+            return Collections.emptyList();
+        }
+        if (mUseRoot || SelfPermissions.checkCrossUserPermission(mUserHandle, false)) {
+            try {
+                return PackageManagerCompat.queryIntentActivities(this, mMutableIntent, PackageManager.MATCH_ALL, mUserHandle);
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+        }
+        return getPackageManager().queryIntentActivities(mMutableIntent, 0);
     }
 
     private void setupVariables() {
-        action = findViewById(R.id.action_edit);
-        data = findViewById(R.id.data_edit);
-        type = findViewById(R.id.type_edit);
-        uri = findViewById(R.id.uri_edit);
+        mActionView = findViewById(R.id.action_edit);
+        mDataView = findViewById(R.id.data_edit);
+        mTypeView = findViewById(R.id.type_edit);
+        mUriView = findViewById(R.id.uri_edit);
+        mPackageNameView = findViewById(R.id.package_edit);
+        mClassNameView = findViewById(R.id.class_edit);
+        mIdView = findViewById(R.id.type_id);
 
-        mHistory = new HistoryEditText(this, action, data, type, uri);
+        mHistory = new HistoryEditText(this, mActionView, mDataView, mTypeView, mUriView, mPackageNameView, mClassNameView);
+
+        // Setup user ID edit
+        mUserIdEdit = findViewById(R.id.user_id_edit);
+        mUserIdEdit.setText(String.valueOf(mUserHandle));
+        mUserIdEdit.setEnabled(SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.INTERACT_ACROSS_USERS)
+                || SelfPermissions.checkSelfOrRemotePermission(ManifestCompat.permission.INTERACT_ACROSS_USERS_FULL));
+        // Setup root
+        mUseRootCheckBox = findViewById(R.id.use_root);
+        mUseRootCheckBox.setChecked(mUseRoot);
+        updateUseRootVisibility();
+        mUseRootCheckBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (mUseRoot != isChecked) {
+                mUseRoot = isChecked;
+                refreshUI();
+            }
+        });
+        LocalServices.state().observe(this, ignored -> updateUseRootVisibility());
+        // Setup identifier
+        TextInputLayout idLayout = findViewById(R.id.type_id_layout);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            idLayout.setEndIconOnClickListener(v -> {
+                mIdView.setText(UUID.randomUUID().toString());
+                mIdView.requestFocus();
+            });
+        } else idLayout.setVisibility(View.GONE);
 
         // Setup categories
-        findViewById(R.id.intent_categories_add_btn).setOnClickListener(v ->
-                new TextInputDropdownDialogBuilder(this, R.string.category)
-                        .setTitle(R.string.category)
-                        .setDropdownItems(INTENT_CATEGORIES, true)
-                        .setNegativeButton(R.string.cancel, null)
-                        .setPositiveButton(R.string.ok, (dialog, which, inputText, isChecked) -> {
-                            if (!TextUtils.isEmpty(inputText)) {
-                                mutableIntent.addCategory(inputText.toString().trim());
-                                categoriesAdapter.setDefaultList(mutableIntent.getCategories());
-                                showTextViewIntentData(null);
-                            }
-                        })
-                        .show());
+        MaterialButton addCategoriesButton = findViewById(R.id.intent_categories_add_btn);
+        addCategoriesButton.setOnClickListener(v -> {
+            UiUtils.fixFocus(addCategoriesButton);
+            new TextInputDropdownDialogBuilder(this, R.string.category)
+                    .setTitle(R.string.category)
+                    .setDropdownItems(INTENT_CATEGORIES, -1, true)
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(R.string.ok, (dialog, which, inputText, isChecked) -> {
+                        if (!TextUtils.isEmpty(inputText)) {
+                            //noinspection ConstantConditions
+                            mMutableIntent.addCategory(inputText.toString().trim());
+                            mCategoriesAdapter.setDefaultList(mMutableIntent.getCategories());
+                            showTextViewIntentData(null);
+                            showResetIntentButton(true);
+                        }
+                    })
+                    .show();
+        });
         RecyclerView categoriesRecyclerView = findViewById(R.id.intent_categories);
-        categoriesRecyclerView.setHasFixedSize(true);
-        categoriesRecyclerView.setLayoutManager(new LinearLayoutManager(this));
-        categoriesAdapter = new CategoriesRecyclerViewAdapter(this);
-        categoriesRecyclerView.setAdapter(categoriesAdapter);
+        categoriesRecyclerView.setLayoutManager(UIUtils.getGridLayoutAt450Dp(this));
+        mCategoriesAdapter = new CategoriesRecyclerViewAdapter(this);
+        categoriesRecyclerView.setAdapter(mCategoriesAdapter);
 
         // Setup flags
-        findViewById(R.id.intent_flags_add_btn).setOnClickListener(v ->
-                new TextInputDropdownDialogBuilder(this, R.string.flags)
-                        .setTitle(R.string.flags)
-                        .setDropdownItems(getAllFlags(), true)
-                        .setNegativeButton(R.string.cancel, null)
-                        .setPositiveButton(R.string.ok, (dialog, which, inputText, isChecked) -> {
-                            if (!TextUtils.isEmpty(inputText)) {
-                                int i = getFlagIndex(String.valueOf(inputText).trim());
-                                if (i >= 0) {
-                                    mutableIntent.addFlags(INTENT_FLAG_TO_STRING.keyAt(i));
-                                } else {
-                                    try {
-                                        int flag = Integer.decode(String.valueOf(inputText).trim());
-                                        mutableIntent.addFlags(flag);
-                                    } catch (NumberFormatException e) {
-                                        return;
-                                    }
+        MaterialButton addFlagsButton = findViewById(R.id.intent_flags_add_btn);
+        addFlagsButton.setOnClickListener(v -> {
+            UiUtils.fixFocus(addFlagsButton);
+            new TextInputDropdownDialogBuilder(this, R.string.flags)
+                    .setTitle(R.string.flags)
+                    .setDropdownItems(getAllFlags(), -1, true)
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(R.string.ok, (dialog, which, inputText, isChecked) -> {
+                        if (!TextUtils.isEmpty(inputText) && mMutableIntent != null) {
+                            int i = getFlagIndex(String.valueOf(inputText).trim());
+                            if (i >= 0) {
+                                mMutableIntent.addFlags(INTENT_FLAG_TO_STRING.keyAt(i));
+                            } else {
+                                try {
+                                    int flag = IntegerCompat.decode(String.valueOf(inputText).trim());
+                                    mMutableIntent.addFlags(flag);
+                                } catch (NumberFormatException e) {
+                                    return;
                                 }
-                                flagsAdapter.setDefaultList(getFlags());
-                                showTextViewIntentData(null);
                             }
-                        })
-                        .show());
+                            mFlagsAdapter.setDefaultList(getFlags());
+                            showTextViewIntentData(null);
+                            showResetIntentButton(true);
+                        }
+                    })
+                    .show();
+        });
         RecyclerView flagsRecyclerView = findViewById(R.id.intent_flags);
-        flagsRecyclerView.setHasFixedSize(true);
-        flagsRecyclerView.setLayoutManager(new LinearLayoutManager(this));
-        flagsAdapter = new FlagsRecyclerViewAdapter(this);
-        flagsRecyclerView.setAdapter(flagsAdapter);
+        flagsRecyclerView.setLayoutManager(UIUtils.getGridLayoutAt450Dp(this));
+        mFlagsAdapter = new FlagsRecyclerViewAdapter(this);
+        flagsRecyclerView.setAdapter(mFlagsAdapter);
 
         // Setup extras
-        findViewById(R.id.intent_extras_add_btn).setOnClickListener(v -> {
+        MaterialButton addExtrasButton = findViewById(R.id.intent_extras_add_btn);
+        addExtrasButton.setOnClickListener(v -> {
+            UiUtils.fixFocus(addExtrasButton);
             AddIntentExtraFragment fragment = new AddIntentExtraFragment();
             fragment.setOnSaveListener((mode, prefItem) -> {
-                IntentCompat.addToIntent(mutableIntent, prefItem);
-                extrasAdapter.setDefaultList(getExtras());
+                if (mMutableIntent != null) {
+                    IntentCompat.addToIntent(mMutableIntent, prefItem);
+                    mExtrasAdapter.setDefaultList(getExtras());
+                    showResetIntentButton(true);
+                }
             });
             Bundle args = new Bundle();
             args.putInt(AddIntentExtraFragment.ARG_MODE, AddIntentExtraFragment.MODE_CREATE);
@@ -523,102 +676,213 @@ public class ActivityInterceptor extends BaseActivity {
             fragment.show(getSupportFragmentManager(), AddIntentExtraFragment.TAG);
         });
         RecyclerView extrasRecyclerView = findViewById(R.id.intent_extras);
-        extrasRecyclerView.setHasFixedSize(true);
-        extrasRecyclerView.setLayoutManager(new LinearLayoutManager(this));
-        extrasAdapter = new ExtrasRecyclerViewAdapter(this);
-        extrasRecyclerView.setAdapter(extrasAdapter);
+        extrasRecyclerView.setLayoutManager(UIUtils.getGridLayoutAt450Dp(this));
+        mExtrasAdapter = new ExtrasRecyclerViewAdapter(this);
+        extrasRecyclerView.setAdapter(mExtrasAdapter);
 
         // Setup matching activities
-        activitiesHeader = findViewById(R.id.intent_matching_activities_header);
-        if (requestedComponent != null) {
+        mActivitiesHeader = findViewById(R.id.intent_matching_activities_header);
+        if (mRequestedComponent != null) {
             // Hide matching activities since specific component requested
-            activitiesHeader.setVisibility(View.GONE);
+            mActivitiesHeader.setVisibility(View.GONE);
         }
         RecyclerView matchingActivitiesRecyclerView = findViewById(R.id.intent_matching_activities);
-        matchingActivitiesRecyclerView.setHasFixedSize(true);
-        matchingActivitiesRecyclerView.setLayoutManager(new LinearLayoutManager(this));
-        matchingActivitiesAdapter = new MatchingActivitiesRecyclerViewAdapter(this);
-        matchingActivitiesRecyclerView.setAdapter(matchingActivitiesAdapter);
+        matchingActivitiesRecyclerView.setLayoutManager(UIUtils.getGridLayoutAt450Dp(this));
+        mMatchingActivitiesAdapter = new MatchingActivitiesRecyclerViewAdapter(this);
+        matchingActivitiesRecyclerView.setAdapter(mMatchingActivitiesAdapter);
 
-        resendIntentButton = findViewById(R.id.resend_intent_button);
-        resetIntentButton = findViewById(R.id.reset_intent_button);
+        mResendIntentButton = findViewById(R.id.resend_intent_button);
+        mResetIntentButton = findViewById(R.id.reset_intent_button);
 
         // Send Intent on clicking the resend intent button
-        resendIntentButton.setOnClickListener(v -> {
-            try {
-                if (requestedComponent == null) {
-                    launcher.launch(Intent.createChooser(mutableIntent, resendIntentButton.getText()));
-                } else {
-                    mutableIntent.setComponent(requestedComponent);
-                    launcher.launch(mutableIntent);
-                }
-            } catch (Throwable th) {
-                Log.e(TAG, th);
-                UIUtils.displayLongToast(R.string.error_with_details, th.getClass().getName() + ": " + th.getMessage());
-            }
+        mResendIntentButton.setOnClickListener(v -> {
+            UiUtils.fixFocus(mResendIntentButton);
+            if (mMutableIntent == null) return;
+            launchIntent(mMutableIntent, mRequestedComponent == null);
         });
         // Reset Intent data on clicking the reset intent button
-        resetIntentButton.setOnClickListener(v -> {
-            areTextWatchersActive = false;
+        mResetIntentButton.setOnClickListener(v -> {
+            UiUtils.fixFocus(mResetIntentButton);
+            mAreTextWatchersActive = false;
             showInitialIntent(false);
-            areTextWatchersActive = true;
+            mAreTextWatchersActive = true;
             refreshUI();
         });
     }
 
+    private void updateUseRootVisibility() {
+        if (mUseRootCheckBox != null) {
+            mUseRootCheckBox.setVisibility(Ops.isWorkingUidRoot() ? View.VISIBLE : View.GONE);
+        }
+    }
+
     private void setupTextWatchers() {
-        action.addTextChangedListener(new IntentUpdateTextWatcher(action) {
+        mActionView.addTextChangedListener(new IntentUpdateTextWatcher(mActionView) {
             @Override
             protected void onUpdateIntent(String modifiedContent) {
-                mutableIntent.setAction(modifiedContent);
+                if (mMutableIntent != null) {
+                    mMutableIntent.setAction(modifiedContent);
+                }
             }
         });
-        data.addTextChangedListener(new IntentUpdateTextWatcher(data) {
+        mDataView.addTextChangedListener(new IntentUpdateTextWatcher(mDataView) {
             @Override
             protected void onUpdateIntent(String modifiedContent) {
-                // setData clears type so we save it
-                String savedType = mutableIntent.getType();
-                mutableIntent.setDataAndType(Uri.parse(modifiedContent), savedType);
+                if (mMutableIntent != null) {
+                    // setDataAndType clears type so we save it
+                    String savedType = mMutableIntent.getType();
+                    mMutableIntent.setDataAndType(Uri.parse(modifiedContent), savedType);
+                }
             }
         });
-        type.addTextChangedListener(new IntentUpdateTextWatcher(type) {
+        mTypeView.addTextChangedListener(new IntentUpdateTextWatcher(mTypeView) {
             @Override
             protected void onUpdateIntent(String modifiedContent) {
-                // setData clears type so we save it
-                String dataString = mutableIntent.getDataString();
-                mutableIntent.setDataAndType(Uri.parse(dataString), modifiedContent);
+                if (mMutableIntent != null) {
+                    // setDataAndType clears data so we save it
+                    String dataString = mMutableIntent.getDataString();
+                    mMutableIntent.setDataAndType(Uri.parse(dataString), modifiedContent);
+                }
             }
         });
-        uri.addTextChangedListener(new IntentUpdateTextWatcher(uri) {
+        mPackageNameView.addTextChangedListener(new IntentUpdateTextWatcher(mPackageNameView) {
+            @Override
+            protected void onUpdateIntent(String modifiedContent) {
+                if (mMutableIntent != null) {
+                    mMutableIntent.setPackage(TextUtils.isEmpty(modifiedContent) ? null : modifiedContent);
+                }
+            }
+        });
+        mClassNameView.addTextChangedListener(new IntentUpdateTextWatcher(mClassNameView) {
+            @Override
+            protected void onUpdateIntent(String modifiedComponent) {
+                if (mMutableIntent == null) return;
+                if (TextUtils.isEmpty(modifiedComponent)) {
+                    mRequestedComponent = null;
+                    mMutableIntent.setComponent(null);
+                    return;
+                }
+                String packageName = mMutableIntent.getPackage();
+                if (packageName == null) {
+                    UIUtils.displayShortToast(R.string.set_package_name_first);
+                    mAreTextWatchersActive = false;
+                    mClassNameView.setText(null);
+                    mAreTextWatchersActive = true;
+                    return;
+                }
+                mRequestedComponent = new ComponentName(packageName, (modifiedComponent.startsWith(".") ?
+                        packageName : "") + modifiedComponent);
+                mMutableIntent.setComponent(mRequestedComponent);
+            }
+        });
+        mUriView.addTextChangedListener(new IntentUpdateTextWatcher(mUriView) {
             @Override
             protected void onUpdateIntent(String modifiedContent) {
                 // no error yet so continue
-                mutableIntent = cloneIntent(modifiedContent);
+                mMutableIntent = cloneIntent(modifiedContent);
                 // this time must update all content since extras/flags may have been changed
-                showAllIntentData(uri);
+                showAllIntentData(mUriView);
+            }
+        });
+        mIdView.addTextChangedListener(new IntentUpdateTextWatcher(mIdView) {
+            @Override
+            protected void onUpdateIntent(String modifiedContent) {
+                if (mMutableIntent != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    mMutableIntent.setIdentifier(modifiedContent);
+                }
+            }
+        });
+        mUserIdEdit.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (s == null) return;
+                try {
+                    mUserHandle = Integer.decode(s.toString());
+                    refreshUI();
+                } catch (NumberFormatException ignore) {
+                }
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
             }
         });
     }
 
     private void showResetIntentButton(boolean visible) {
-        resendIntentButton.setText(R.string.send_edited_intent);
-        resetIntentButton.setVisibility((visible) ? View.VISIBLE : View.GONE);
+        mResendIntentButton.setText(R.string.send_edited_intent);
+        mResetIntentButton.setVisibility((visible) ? View.VISIBLE : View.GONE);
     }
 
     private void copyIntentDetails() {
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(ClipData.newPlainText("Intent Details", getIntentDetailsString()));
+        Utils.copyToClipboard(this, "Intent Details", getIntentDetailsString());
+    }
+
+    private void copyIntentAsCommand() {
+        if (mMutableIntent == null) {
+            return;
+        }
+        List<String> args = IntentCompat.flattenToCommand(mMutableIntent);
+        String command = String.format(Locale.ROOT, "%s start --user %d %s", RunnerUtils.CMD_AM, mUserHandle,
+                TextUtils.join(" ", args));
+        Utils.copyToClipboard(this, "am command", command);
+    }
+
+    private void pasteIntentDetails() {
+        CharSequence clipData = ClipboardUtils.readClipboard(this);
+        if (clipData == null) return;
+        String text = clipData.toString();
+        // Get ROOT <bool> and USER <id> since they aren't part of IntentCompat.unflattenFromString()
+        String[] lines = text.split("\n");
+        mUseRoot = false;
+        mUserHandle = UserHandleHidden.myUserId();
+        int parseCount = 0;
+        for (String line : lines) {
+            if (TextUtils.isEmpty(line)) continue;
+            StringTokenizer tokenizer = new StringTokenizer(line, "\t");
+            switch (tokenizer.nextToken()) {
+                case "ROOT":
+                    mUseRoot = Ops.isWorkingUidRoot() && Boolean.parseBoolean(tokenizer.nextToken());
+                    ++parseCount;
+                    break;
+                case "USER":
+                    int userId = Integer.decode(tokenizer.nextToken());
+                    if (SelfPermissions.checkCrossUserPermission(userId, false)) {
+                        mUserHandle = userId;
+                    }
+                    ++parseCount;
+                    break;
+            }
+            if (parseCount == 2) {
+                // Got both ROOT and USER, no need to continue the loop
+                break;
+            }
+        }
+        // Rebuild Intent
+        Intent intent = IntentCompat.unflattenFromString(text);
+        if (intent != null) {
+            // Requested component set to NULL in case it was set previously
+            mRequestedComponent = null;
+            init(intent, false);
+        }
     }
 
     private void refreshUI() {
-        if (requestedComponent == null) {
+        if (mMutableIntent == null) return;
+        if (mRequestedComponent == null) {
             // Since no explicit component requested, display matching activities
             checkAndShowMatchingActivities();
+        } else {
+            // Hide matching activities since specific component requested
+            mActivitiesHeader.setVisibility(View.GONE);
+            mResendIntentButton.setEnabled(true);
         }
-        if (shareActionProvider != null) {
-            Intent share = createShareIntent();
-            shareActionProvider.setShareIntent(share);
-        }
+        updateTitle(mMutableIntent.getPackage());
+        updateSubtitle(mMutableIntent.getComponent());
     }
 
     @NonNull
@@ -631,141 +895,89 @@ public class ActivityInterceptor extends BaseActivity {
 
     @NonNull
     private String getIntentDetailsString() {
-        StringBuilder result = new StringBuilder();
-
-        result.append(getUri(mutableIntent)).append(NEWSEGMENT);
-
-        appendIntentDetails(result, mutableIntent, true).append(NEWSEGMENT);
-
+        if (mMutableIntent == null) {
+            return "";
+        }
         PackageManager pm = getPackageManager();
-        List<ResolveInfo> resolveInfo = pm.queryIntentActivities(mutableIntent, 0);
-
+        List<ResolveInfo> resolveInfo = getMatchingActivities();
         int numberOfMatchingActivities = resolveInfo.size();
 
-        appendHeader(result, R.string.matching_activities);
-        if (numberOfMatchingActivities < 1) {
-            appendHeader(result, R.string.no_content);
-        } else {
-            for (ResolveInfo info : resolveInfo) {
-                ActivityInfo activityinfo = info.activityInfo;
-                result.append("* ").append(activityinfo.loadLabel(pm))
-                        .append(" (")
-                        .append(activityinfo.packageName)
-                        .append(" - ")
-                        .append(activityinfo.name)
-                        .append(")\n");
-            }
+        StringBuilder result = new StringBuilder();
+        // NOTE: At least 1 tab have to be present in each non-empty line. Empty lines are ignored.
+        // URI <URI> (unused)
+        result.append("URI\t").append(getUri(mMutableIntent)).append("\n");
+        // ROOT <bool>
+        if (mUseRoot) result.append("ROOT\t").append(mUseRoot).append("\n");
+        // USER <id>
+        if (mUserHandle != UserHandleHidden.myUserId()) {
+            result.append("USER\t").append(mUserHandle).append("\n");
         }
-
+        result.append("\n");
+        // Convert the Intent to parsable string
+        result.append(IntentCompat.flattenToString(mMutableIntent)).append("\n");
+        // MATCHING ACTIVITIES <match-count>
+        result.append("MATCHING ACTIVITIES\t").append(numberOfMatchingActivities).append("\n");
+        // Calculate the number of spaces needed in order to align activity items properly
+        int spaceCount = String.valueOf(numberOfMatchingActivities).length();
+        StringBuilder spaces = new StringBuilder();
+        while ((spaceCount--) != 0) spaces.append(" ");
+        for (int i = 0; i < numberOfMatchingActivities; ++i) {
+            ActivityInfo activityinfo = resolveInfo.get(i).activityInfo;
+            // Line 1: <no> LABEL   <activity-label>
+            // Line 2:      NAME    <activity-name>
+            // Line 3:      PACKAGE <package-name>
+            result.append(i).append("\tLABEL  \t").append(activityinfo.loadLabel(pm)).append("\n");
+            result.append(spaces).append("\tNAME   \t").append(activityinfo.name).append("\n");
+            result.append(spaces).append("\tPACKAGE\t").append(activityinfo.packageName).append("\n");
+        }
         // Add activity results
-        if (this.lastResultCode != null) {
-            result.append(NEWSEGMENT);
-            appendHeader(result, R.string.activity_result);
-            appendNameValue(result, R.string.result_code, this.lastResultCode);
-
-            if (this.lastResultIntent != null) {
-                appendIntentDetails(result, lastResultIntent, false);
+        if (mLastResultCode != null) {
+            result.append("\n");
+            // ACTIVITY RESULT <result-code>
+            result.append("ACTIVITY RESULT\t").append(mLastResultCode).append("\n");
+            if (mLastResultIntent != null) {
+                // Print the last result intent with RESULT prefix so that it will not be parsed by the parser
+                result.append(IntentCompat.describeIntent(mLastResultIntent, "RESULT"));
             }
         }
-
         return result.toString();
     }
 
-    private StringBuilder appendIntentDetails(StringBuilder result, Intent intent, boolean detailed) {
-        if (detailed) appendNameValue(result, R.string.action, intent.getAction());
-
-        appendNameValue(result, R.string.data, intent.getData());
-        appendNameValue(result, R.string.mime_type, intent.getType());
-        appendNameValue(result, R.string.uri, getUri(intent));
-
-        Set<String> categories = intent.getCategories();
-        if ((categories != null) && (categories.size() > 0)) {
-            appendHeader(result, R.string.category);
-            for (String category : categories) {
-                result.append(category).append(NEWLINE);
-            }
-        }
-
-        if (detailed) {
-            appendHeader(result, R.string.flags);
-            ArrayList<String> flagsStrings = getFlags();
-            if (!flagsStrings.isEmpty()) {
-                for (String thisFlagString : flagsStrings) {
-                    result.append(thisFlagString).append(NEWLINE);
-                }
-            } else {
-                result.append(getString(R.string.none)).append(NEWLINE);
-            }
-        }
-
+    public void launchIntent(@NonNull Intent intent, boolean createChooser) {
+        boolean needPrivilege = mUseRoot || mUserHandle != UserHandleHidden.myUserId();
         try {
-            Bundle intentBundle = intent.getExtras();
-            if (intentBundle != null) {
-                Set<String> keySet = intentBundle.keySet();
-                appendHeader(result, R.string.extras);
-                int count = 0;
-
-                for (String key : keySet) {
-                    count++;
-                    Object thisObject = intentBundle.get(key);
-                    if (thisObject == null) continue;
-                    result.append(count).append(BLANK);
-                    String thisClass = thisObject.getClass().getName();
-                    result.append(getString(R.string.class_name)).append(BLANK)
-                            .append(thisClass).append(NEWLINE);
-                    result.append(getString(R.string.key_name)).append(BLANK)
-                            .append(key).append(NEWLINE);
-
-                    if (thisObject instanceof String || thisObject instanceof Long
-                            || thisObject instanceof Integer
-                            || thisObject instanceof Boolean
-                            || thisObject instanceof Uri) {
-                        result.append(getString(R.string.value)).append(BLANK)
-                                .append(thisObject)
-                                .append(NEWLINE);
-                    } else if (thisObject instanceof ArrayList) {
-                        result.append(getString(R.string.value)).append(NEWLINE);
-                        ArrayList<?> thisArrayList = (ArrayList<?>) thisObject;
-                        for (Object thisArrayListObject : thisArrayList) {
-                            result.append(thisArrayListObject.toString()).append(NEWLINE);
-                        }
+            if (createChooser) {
+                Intent chooserIntent = Intent.createChooser(intent, mResendIntentButton != null ?
+                        mResendIntentButton.getText() : getString(R.string.open));
+                if (needPrivilege) {
+                    // TODO: 4/2/22 Support sending activity result back to the original app
+                    ActivityManagerCompat.startActivity(chooserIntent, mUserHandle);
+                } else {
+                    mIntentLauncher.launch(chooserIntent);
+                }
+            } else { // Launch a fixed component
+                if (needPrivilege) {
+                    // TODO: 4/2/22 Support sending activity result back to the original app
+                    ActivityManagerCompat.startActivity(intent, mUserHandle);
+                } else {
+                    try {
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        mIntentLauncher.launch(intent);
+                    } catch (SecurityException e) {
+                        // TODO: 4/6/24 Support sending activity result back to the original app
+                        ActivityManagerCompat.startActivity(intent, mUserHandle);
                     }
                 }
             }
-        } catch (Exception e) {
-            result.append(getString(R.string.extras)).append(NEWLINE);
-            result.append(getString(R.string.error)).append(NEWLINE);
-            e.printStackTrace();
-        }
-        return result;
-    }
-
-    private void appendNameValue(StringBuilder result, int keyId, Object value) {
-        if (value != null) {
-            result.append(BOLD_START).append(getString(keyId)).append(BOLD_END_BLANK)
-                    .append(value).append(NEWLINE);
+        } catch (Throwable th) {
+            Log.e(TAG, th);
+            UIUtils.displayLongToast(R.string.error_with_details, th.getClass().getName() + ": " + th.getMessage());
         }
     }
-
-    private void appendHeader(@NonNull StringBuilder result, int keyId) {
-        result.append(BOLD_START).append(getString(keyId)).append(BOLD_END_NL);
-    }
-
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.activity_activity_interceptor_actions, menu);
-        MenuItem actionItem = menu.findItem(R.id.action_share);
-
-        shareActionProvider = (ShareActionProvider) MenuItemCompat.getActionProvider(actionItem);
-
-        if (shareActionProvider == null) {
-            shareActionProvider = new ShareActionProvider(this);
-            MenuItemCompat.setActionProvider(actionItem, shareActionProvider);
-        }
-
-        shareActionProvider.setShareHistoryFileName(ShareActionProvider.DEFAULT_SHARE_HISTORY_FILE_NAME);
-        refreshUI();
         return super.onCreateOptionsMenu(menu);
     }
 
@@ -775,8 +987,51 @@ public class ActivityInterceptor extends BaseActivity {
         if (id == android.R.id.home) {
             finish();
             return true;
-        } else if (id == R.id.action_copy) {
+        } else if (id == R.id.action_copy_as_default) {
             copyIntentDetails();
+            return true;
+        } else if (id == R.id.action_copy_as_command) {
+            copyIntentAsCommand();
+            return true;
+        } else if (id == R.id.action_paste) {
+            pasteIntentDetails();
+            return true;
+        } else if (id == R.id.action_shortcut) {
+            try {
+                ActionBar actionBar = getSupportActionBar();
+                CharSequence shortcutName = null;
+                if (actionBar != null) {
+                    shortcutName = actionBar.getSubtitle();
+                }
+                if (shortcutName == null) {
+                    shortcutName = Objects.requireNonNull(getTitle());
+                }
+                Drawable icon = Objects.requireNonNull(ContextCompat.getDrawable(this, R.drawable.ic_launcher_foreground));
+                Intent intent = new Intent(mMutableIntent);
+                // Add necessary extras
+                intent.putExtra(EXTRA_AUTH, AuthManager.getKey());
+                intent.putExtra(EXTRA_TRIGGER_ON_START, true);
+                intent.putExtra(EXTRA_ACTION, intent.getAction());
+                if (mUseRoot) {
+                    intent.putExtra(EXTRA_ROOT, true);
+                }
+                if (mUserHandle != UserHandleHidden.myUserId()) {
+                    intent.putExtra(EXTRA_USER_HANDLE, mUserHandle);
+                }
+                if (mRequestedComponent != null) {
+                    intent.putExtra(EXTRA_PACKAGE_NAME, mRequestedComponent.getPackageName());
+                    intent.putExtra(EXTRA_CLASS_NAME, mRequestedComponent.getClassName());
+                }
+                intent.setClass(getApplicationContext(), ActivityInterceptor.class);
+                InterceptorShortcutInfo shortcutInfo = new InterceptorShortcutInfo(intent);
+                shortcutInfo.setName(shortcutName);
+                shortcutInfo.setIcon(UIUtils.getBitmapFromDrawable(icon));
+                CreateShortcutDialogFragment dialog = CreateShortcutDialogFragment.getInstance(shortcutInfo);
+                dialog.show(getSupportFragmentManager(), CreateShortcutDialogFragment.TAG);
+            } catch (Throwable th) {
+                Log.e(TAG, th);
+                UIUtils.displayLongToast(R.string.error_with_details, th.getClass().getName() + ": " + th.getMessage());
+            }
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -785,46 +1040,59 @@ public class ActivityInterceptor extends BaseActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        areTextWatchersActive = false;
+        mAreTextWatchersActive = false;
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        // inhibit new activity animation when resetting intent details
+        // Inhibit new activity animation when resetting intent details
         overridePendingTransition(0, 0);
-        areTextWatchersActive = true;
+        mAreTextWatchersActive = true;
     }
 
     @Override
     protected void onSaveInstanceState(@NonNull Bundle outState) {
         super.onSaveInstanceState(outState);
-        if (resetIntentButton != null) {
-            outState.putBoolean(INTENT_EDITED, resetIntentButton.getVisibility() == View.VISIBLE);
+        if (mResetIntentButton != null) {
+            outState.putBoolean(INTENT_EDITED, mResetIntentButton.getVisibility() == View.VISIBLE);
         }
-        if (mHistory != null) mHistory.saveHistory();
+        if (mHistory != null) {
+            mHistory.saveHistory();
+        }
     }
 
-    private static String getUri(Intent src) {
-        return (src != null) ? src.toUri(Intent.URI_INTENT_SCHEME) : null;
+    @Nullable
+    private static String getUri(@Nullable Intent src) {
+        try {
+            return (src != null) ? IntentCompat.toUri(src, Intent.URI_INTENT_SCHEME) : null;
+        } catch (BadParcelableException e) {
+            // TODO: 4/2/22 Add support for invalid classes. This could be done in the following way:
+            //  1. Upon detecting a BPE (and the class name), ask the user to select the source application
+            //  2. Load the source application via the DexClassLoader
+            //  3. Use Class.forName() to load the class and it's class loader to recognize the Parcelable
+            //  The other option is to skip the problematic classes.
+            e.printStackTrace();
+            return null;
+        }
     }
 
-    private Intent cloneIntent(String intentUri) {
-        if (intentUri != null) {
-            try {
-                Intent clone;
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP_MR1) {
-                    clone = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME | Intent.URI_ANDROID_APP_SCHEME
-                            | Intent.URI_ALLOW_UNSAFE);
-                } else clone = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME);
-                // Restore extras that are lost in the intent to string conversion
-                if (additionalExtras != null) {
-                    clone.putExtras(additionalExtras);
-                }
-                return clone;
-            } catch (URISyntaxException e) {
-                e.printStackTrace();
+    @Nullable
+    private Intent cloneIntent(@Nullable String intentUri) {
+        if (intentUri == null) return null;
+        try {
+            Intent clone;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                clone = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME | Intent.URI_ANDROID_APP_SCHEME
+                        | Intent.URI_ALLOW_UNSAFE);
+            } else clone = Intent.parseUri(intentUri, Intent.URI_INTENT_SCHEME);
+            // Restore extras that are lost in the intent to string conversion
+            if (mAdditionalExtras != null) {
+                clone.putExtras(mAdditionalExtras);
             }
+            return clone;
+        } catch (URISyntaxException e) {
+            e.printStackTrace();
         }
         return null;
     }
@@ -845,18 +1113,28 @@ public class ActivityInterceptor extends BaseActivity {
         return -1;
     }
 
-    private static class CategoriesRecyclerViewAdapter extends RecyclerView.Adapter<CategoriesRecyclerViewAdapter.ViewHolder> {
-        private final List<String> categories = new ArrayList<>();
-        private final ActivityInterceptor activity;
+    private static class CategoriesRecyclerViewAdapter extends ListAdapter<String, CategoriesRecyclerViewAdapter.ViewHolder> {
+        private final ActivityInterceptor mActivity;
+
+        private static final DiffUtil.ItemCallback<String> DIFF_CALLBACK = new DiffUtil.ItemCallback<String>() {
+            @Override
+            public boolean areItemsTheSame(@NonNull String oldItem, @NonNull String newItem) {
+                return Objects.equals(oldItem, newItem);
+            }
+
+            @Override
+            public boolean areContentsTheSame(@NonNull String oldItem, @NonNull String newItem) {
+                return true;
+            }
+        };
 
         public CategoriesRecyclerViewAdapter(ActivityInterceptor activity) {
-            this.activity = activity;
+            super(DIFF_CALLBACK);
+            mActivity = activity;
         }
 
         public void setDefaultList(@Nullable Collection<String> categories) {
-            this.categories.clear();
-            if (categories != null) this.categories.addAll(categories);
-            notifyDataSetChanged();
+            submitList(categories != null ? new ArrayList<>(categories) : null);
         }
 
         @NonNull
@@ -868,72 +1146,79 @@ public class ActivityInterceptor extends BaseActivity {
 
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-            String category = categories.get(position);
+            String category = getItem(position);
             holder.title.setText(category);
             holder.title.setTextIsSelectable(true);
             holder.actionIcon.setOnClickListener(v -> {
-                activity.mutableIntent.removeCategory(category);
-                setDefaultList(activity.mutableIntent.getCategories());
-                activity.showTextViewIntentData(null);
-            });
-        }
-
-        @Override
-        public int getItemCount() {
-            return categories.size();
-        }
-
-        static class ViewHolder extends RecyclerView.ViewHolder {
-            TextView title;
-            MaterialButton actionIcon;
-
-            public ViewHolder(@NonNull View itemView) {
-                super(itemView);
-                title = itemView.findViewById(R.id.item_title);
-                actionIcon = itemView.findViewById(R.id.item_action);
-            }
-        }
-    }
-
-    private static class FlagsRecyclerViewAdapter extends RecyclerView.Adapter<FlagsRecyclerViewAdapter.ViewHolder> {
-        private final List<String> flags = new ArrayList<>();
-        private final ActivityInterceptor activity;
-
-        public FlagsRecyclerViewAdapter(ActivityInterceptor activity) {
-            this.activity = activity;
-        }
-
-        public void setDefaultList(@Nullable Collection<String> flags) {
-            this.flags.clear();
-            if (flags != null) this.flags.addAll(flags);
-            notifyDataSetChanged();
-        }
-
-        @NonNull
-        @Override
-        public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_title_action, parent, false);
-            return new ViewHolder(view);
-        }
-
-        @Override
-        public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-            String flagName = flags.get(position);
-            holder.title.setText(flagName);
-            holder.title.setTextIsSelectable(true);
-            holder.actionIcon.setOnClickListener(v -> {
-                int i = INTENT_FLAG_TO_STRING.indexOfValue(flagName);
-                if (i >= 0) {
-                    IntentCompat.removeFlags(activity.mutableIntent, INTENT_FLAG_TO_STRING.keyAt(i));
-                    setDefaultList(activity.getFlags());
-                    activity.showTextViewIntentData(null);
+                UiUtils.fixFocus(holder.actionIcon);
+                if (mActivity.mMutableIntent != null) {
+                    mActivity.mMutableIntent.removeCategory(category);
+                    setDefaultList(mActivity.mMutableIntent.getCategories());
+                    mActivity.showTextViewIntentData(null);
+                    mActivity.showResetIntentButton(true);
                 }
             });
         }
 
+        static class ViewHolder extends RecyclerView.ViewHolder {
+            TextView title;
+            MaterialButton actionIcon;
+
+            public ViewHolder(@NonNull View itemView) {
+                super(itemView);
+                title = itemView.findViewById(R.id.item_title);
+                actionIcon = itemView.findViewById(R.id.item_action);
+                actionIcon.setContentDescription(itemView.getContext().getString(R.string.item_remove));
+            }
+        }
+    }
+
+    private static class FlagsRecyclerViewAdapter extends ListAdapter<String, FlagsRecyclerViewAdapter.ViewHolder> {
+        private final ActivityInterceptor mActivity;
+
+        private static final DiffUtil.ItemCallback<String> DIFF_CALLBACK = new DiffUtil.ItemCallback<String>() {
+            @Override
+            public boolean areItemsTheSame(@NonNull String oldItem, @NonNull String newItem) {
+                return Objects.equals(oldItem, newItem);
+            }
+
+            @Override
+            public boolean areContentsTheSame(@NonNull String oldItem, @NonNull String newItem) {
+                return true;
+            }
+        };
+
+        public FlagsRecyclerViewAdapter(ActivityInterceptor activity) {
+            super(DIFF_CALLBACK);
+            mActivity = activity;
+        }
+
+        public void setDefaultList(@Nullable List<String> flags) {
+            submitList(flags != null ? new ArrayList<>(flags) : null);
+        }
+
+        @NonNull
         @Override
-        public int getItemCount() {
-            return flags.size();
+        public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_title_action, parent, false);
+            return new ViewHolder(view);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
+            String flagName = getItem(position);
+            holder.title.setText(flagName);
+            holder.title.setTextIsSelectable(true);
+            holder.actionIcon.setOnClickListener(v -> {
+                UiUtils.fixFocus(holder.actionIcon);
+                int i = INTENT_FLAG_TO_STRING.indexOfValue(flagName);
+                if (i >= 0 && mActivity.mMutableIntent != null) {
+                    IntentCompat.removeFlags(mActivity.mMutableIntent, INTENT_FLAG_TO_STRING.keyAt(i));
+                    setDefaultList(mActivity.getFlags());
+                    mActivity.showTextViewIntentData(null);
+                    mActivity.showResetIntentButton(true);
+                }
+            });
         }
 
         static class ViewHolder extends RecyclerView.ViewHolder {
@@ -944,22 +1229,56 @@ public class ActivityInterceptor extends BaseActivity {
                 super(itemView);
                 title = itemView.findViewById(R.id.item_title);
                 actionIcon = itemView.findViewById(R.id.item_action);
+                actionIcon.setContentDescription(itemView.getContext().getString(R.string.item_remove));
             }
         }
     }
 
-    private static class ExtrasRecyclerViewAdapter extends RecyclerView.Adapter<ExtrasRecyclerViewAdapter.ViewHolder> {
-        private final List<Pair<String, Object>> extras = new ArrayList<>();
-        private final ActivityInterceptor activity;
+    private static class ExtrasRecyclerViewAdapter extends ListAdapter<ExtrasRecyclerViewAdapter.ExtraPair, ExtrasRecyclerViewAdapter.ViewHolder> {
+        private final ActivityInterceptor mActivity;
 
-        public ExtrasRecyclerViewAdapter(ActivityInterceptor activity) {
-            this.activity = activity;
+        static class ExtraPair {
+            @NonNull
+            final String key;
+            @NonNull
+            final Object value;
+
+            ExtraPair(@NonNull String key, @NonNull Object value) {
+                this.key = key;
+                this.value = value;
+            }
         }
 
-        public void setDefaultList(@Nullable List<Pair<String, Object>> extras) {
-            this.extras.clear();
-            if (extras != null) this.extras.addAll(extras);
-            notifyDataSetChanged();
+        private static final DiffUtil.ItemCallback<ExtraPair> DIFF_CALLBACK = new DiffUtil.ItemCallback<ExtraPair>() {
+            @Override
+            public boolean areItemsTheSame(@NonNull ExtraPair oldItem, @NonNull ExtraPair newItem) {
+                return Objects.equals(oldItem.key, newItem.key);
+            }
+
+            @Override
+            public boolean areContentsTheSame(@NonNull ExtraPair oldItem, @NonNull ExtraPair newItem) {
+                return Objects.equals(oldItem.value, newItem.value);
+            }
+        };
+
+        public ExtrasRecyclerViewAdapter(ActivityInterceptor activity) {
+            super(DIFF_CALLBACK);
+            mActivity = activity;
+        }
+
+        public void setDefaultList(@Nullable Bundle extras) {
+            if (extras == null || extras.isEmpty()) {
+                submitList(null);
+                return;
+            }
+            List<ExtraPair> pairs = new ArrayList<>(extras.size());
+            for (String key : extras.keySet()) {
+                Object value = extras.get(key);
+                if (value != null) {
+                    pairs.add(new ExtraPair(key, value));
+                }
+            }
+            submitList(pairs);
         }
 
         @NonNull
@@ -971,21 +1290,22 @@ public class ActivityInterceptor extends BaseActivity {
 
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-            Pair<String, Object> extraItem = extras.get(position);
-            holder.title.setText(extraItem.first);
+            ExtraPair pair = getItem(position);
+            String key = pair.key;
+            Object value = pair.value;
+            holder.title.setText(key);
             holder.title.setTextIsSelectable(true);
-            holder.subtitle.setText(extraItem.second.toString());
+            holder.subtitle.setText(value.toString());
             holder.subtitle.setTextIsSelectable(true);
             holder.actionIcon.setOnClickListener(v -> {
-                activity.mutableIntent.removeExtra(extraItem.first);
-                extras.remove(position);
-                notifyDataSetChanged();
+                UiUtils.fixFocus(holder.actionIcon);
+                if (mActivity.mMutableIntent != null) {
+                    mActivity.mMutableIntent.removeExtra(key);
+                    mActivity.showTextViewIntentData(null);
+                    setDefaultList(mActivity.mMutableIntent.getExtras());
+                    mActivity.showResetIntentButton(true);
+                }
             });
-        }
-
-        @Override
-        public int getItemCount() {
-            return extras.size();
         }
 
         static class ViewHolder extends RecyclerView.ViewHolder {
@@ -999,27 +1319,50 @@ public class ActivityInterceptor extends BaseActivity {
                 title = itemView.findViewById(R.id.item_title);
                 subtitle = itemView.findViewById(R.id.item_subtitle);
                 actionIcon = itemView.findViewById(R.id.item_open);
-                actionIcon.setIconResource(R.drawable.ic_delete_black_24dp);
+                actionIcon.setIconResource(R.drawable.ic_trash_can);
+                actionIcon.setContentDescription(itemView.getContext().getString(R.string.item_remove));
                 icon = itemView.findViewById(R.id.item_icon);
                 icon.setVisibility(View.GONE);
             }
         }
     }
 
-    private static class MatchingActivitiesRecyclerViewAdapter extends RecyclerView.Adapter<MatchingActivitiesRecyclerViewAdapter.ViewHolder> {
-        private final List<ResolveInfo> matchingActivities = new ArrayList<>();
-        private final PackageManager pm;
-        private final ActivityInterceptor activity;
+    private static class MatchingActivitiesRecyclerViewAdapter extends ListAdapter<ResolveInfo, MatchingActivitiesRecyclerViewAdapter.ViewHolder> {
+        private final PackageManager mPm;
+        private final ActivityInterceptor mActivity;
 
-        public MatchingActivitiesRecyclerViewAdapter(ActivityInterceptor activity) {
-            this.activity = activity;
-            pm = activity.getPackageManager();
+        private static final DiffUtil.ItemCallback<ResolveInfo> DIFF_CALLBACK = new DiffUtil.ItemCallback<ResolveInfo>() {
+            @Override
+            public boolean areItemsTheSame(@NonNull ResolveInfo oldItem, @NonNull ResolveInfo newItem) {
+                ActivityInfo oldInfo = oldItem.activityInfo;
+                ActivityInfo newInfo = newItem.activityInfo;
+                if (oldInfo == null || newInfo == null) {
+                    return false;
+                }
+                return Objects.equals(oldInfo.packageName, newInfo.packageName)
+                        && Objects.equals(oldInfo.name, newInfo.name);
+            }
+
+            @Override
+            public boolean areContentsTheSame(@NonNull ResolveInfo oldItem, @NonNull ResolveInfo newItem) {
+                ActivityInfo oldInfo = oldItem.activityInfo;
+                ActivityInfo newInfo = newItem.activityInfo;
+                if (oldInfo == null || newInfo == null) {
+                    return false;
+                }
+                return Objects.equals(oldInfo.enabled, newInfo.enabled)
+                        && oldInfo.exported == newInfo.exported;
+            }
+        };
+
+        public MatchingActivitiesRecyclerViewAdapter(@NonNull ActivityInterceptor activity) {
+            super(DIFF_CALLBACK);
+            mActivity = activity;
+            mPm = activity.getPackageManager();
         }
 
         public void setDefaultList(@Nullable List<ResolveInfo> matchingActivities) {
-            this.matchingActivities.clear();
-            if (matchingActivities != null) this.matchingActivities.addAll(matchingActivities);
-            notifyDataSetChanged();
+            submitList(matchingActivities != null ? new ArrayList<>(matchingActivities) : null);
         }
 
         @NonNull
@@ -1031,30 +1374,26 @@ public class ActivityInterceptor extends BaseActivity {
 
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-            ResolveInfo resolveInfo = matchingActivities.get(position);
+            ResolveInfo resolveInfo = getItem(position);
             ActivityInfo info = resolveInfo.activityInfo;
-            holder.title.setText(info.loadLabel(pm));
-            String activityName = info.targetActivity != null ? info.targetActivity : info.name;
+            holder.title.setText(info.loadLabel(mPm));
+            String activityName = info.name;
             String name = info.packageName + "\n" + activityName;
             holder.subtitle.setText(name);
             holder.subtitle.setTextIsSelectable(true);
-            activity.imageLoader.displayImage(info.packageName + "_" + activityName, info, holder.icon);
+            String tag = info.packageName + "_" + activityName;
+            holder.icon.setTag(tag);
+            holder.icon.setImageDrawable(null);
+            ImageLoader.getInstance().displayImage(tag, info, holder.icon);
             holder.actionIcon.setOnClickListener(v -> {
-                Intent intent = new Intent(activity.mutableIntent);
-                intent.setClassName(info.packageName, activityName);
-                IntentCompat.removeFlags(intent, Intent.FLAG_ACTIVITY_FORWARD_RESULT);
-                try {
-                    activity.launcher.launch(intent);
-                } catch (Throwable th) {
-                    Log.e(TAG, th);
-                    UIUtils.displayLongToast(R.string.error_with_details, th.getClass().getName() + ": " + th.getMessage());
+                UiUtils.fixFocus(holder.actionIcon);
+                if (mActivity.mMutableIntent != null) {
+                    Intent intent = new Intent(mActivity.mMutableIntent);
+                    intent.setClassName(info.packageName, activityName);
+                    IntentCompat.removeFlags(intent, Intent.FLAG_ACTIVITY_FORWARD_RESULT);
+                    mActivity.launchIntent(intent, false);
                 }
             });
-        }
-
-        @Override
-        public int getItemCount() {
-            return matchingActivities.size();
         }
 
         static class ViewHolder extends RecyclerView.ViewHolder {
@@ -1068,6 +1407,7 @@ public class ActivityInterceptor extends BaseActivity {
                 title = itemView.findViewById(R.id.item_title);
                 subtitle = itemView.findViewById(R.id.item_subtitle);
                 actionIcon = itemView.findViewById(R.id.item_open);
+                actionIcon.setContentDescription(itemView.getContext().getString(R.string.open));
                 icon = itemView.findViewById(R.id.item_icon);
             }
         }

@@ -1,0 +1,64 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <PreferenceCategory app:layout="@layout/m3_preference_category_empty">
+        <io.github.muntashirakon.preference.HyperlinkPreference
+            app:iconSpaceReserved="false"
+            app:summary="@string/copyright_message"
+            app:title="@string/app_name" />
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="version"
+            app:title="@string/pref_version_changelog"
+            tools:summary="v3.0.0 (410)" />
+
+        <io.github.muntashirakon.preference.HyperlinkPreference
+            app:iconSpaceReserved="false"
+            app:key="license"
+            app:summary="@string/license_message"
+            app:title="@string/license" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:layout="@layout/m3_preference_category_empty">
+        <io.github.muntashirakon.preference.HyperlinkPreference
+            app:iconSpaceReserved="false"
+            app:summary="@string/source_code_links"
+            app:title="@string/source_code" />
+
+        <io.github.muntashirakon.preference.HyperlinkPreference
+            app:iconSpaceReserved="false"
+            app:summary="@string/community_links"
+            app:title="@string/community" />
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="website"
+            app:title="@string/website" />
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="user_manual"
+            app:title="@string/user_manual" />
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="get_help"
+            app:title="@string/get_help" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:layout="@layout/m3_preference_category_empty">
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="third_party_libraries"
+            app:title="@string/third_party" />
+
+        <Preference
+            app:iconSpaceReserved="false"
+            app:key="credits"
+            app:title="@string/credits" />
+    </PreferenceCategory>
+
+</PreferenceScreen>

@@ -4,7 +4,12 @@ package io.github.muntashirakon.AppManager.ipc.ps;
 
 import android.os.Parcel;
 import android.os.Parcelable;
+
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.core.os.ParcelCompat;
+
+import java.util.Objects;
 
 public class ProcessEntry implements Parcelable {
     public int pid;
@@ -14,6 +19,7 @@ public class ProcessEntry implements Parcelable {
     public long instructionPointer;
     public long virtualMemorySize;
     public long residentSetSize;
+    public long sharedMemory;
     public int processGroupId;
     public int majorPageFaults;
     public int minorPageFaults;
@@ -22,10 +28,12 @@ public class ProcessEntry implements Parcelable {
     public int cpu;
     public int threadCount;
     public int tty;
+    @Nullable
     public String seLinuxPolicy;
     public String name;
     public ProcessUsers users;
     public long cpuTimeConsumed;
+    public long cCpuTimeConsumed;
     public long elapsedTime;
     public String processState;
     public String processStatePlus;
@@ -41,6 +49,7 @@ public class ProcessEntry implements Parcelable {
         instructionPointer = in.readLong();
         virtualMemorySize = in.readLong();
         residentSetSize = in.readLong();
+        sharedMemory = in.readLong();
         processGroupId = in.readInt();
         majorPageFaults = in.readInt();
         minorPageFaults = in.readInt();
@@ -51,8 +60,9 @@ public class ProcessEntry implements Parcelable {
         tty = in.readInt();
         seLinuxPolicy = in.readString();
         name = in.readString();
-        users = in.readParcelable(ProcessUsers.class.getClassLoader());
+        users = Objects.requireNonNull(ParcelCompat.readParcelable(in, ProcessUsers.class.getClassLoader(), ProcessUsers.class));
         cpuTimeConsumed = in.readLong();
+        cCpuTimeConsumed = in.readLong();
         elapsedTime = in.readLong();
         processState = in.readString();
         processStatePlus = in.readString();
@@ -86,6 +96,7 @@ public class ProcessEntry implements Parcelable {
         dest.writeLong(instructionPointer);
         dest.writeLong(virtualMemorySize);
         dest.writeLong(residentSetSize);
+        dest.writeLong(sharedMemory);
         dest.writeInt(processGroupId);
         dest.writeInt(majorPageFaults);
         dest.writeInt(minorPageFaults);
@@ -98,6 +109,7 @@ public class ProcessEntry implements Parcelable {
         dest.writeString(name);
         dest.writeParcelable(users, flags);
         dest.writeLong(cpuTimeConsumed);
+        dest.writeLong(cCpuTimeConsumed);
         dest.writeLong(elapsedTime);
         dest.writeString(processState);
         dest.writeString(processStatePlus);

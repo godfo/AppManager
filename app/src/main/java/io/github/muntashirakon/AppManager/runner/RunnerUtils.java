@@ -3,14 +3,11 @@
 package io.github.muntashirakon.AppManager.runner;
 
 import android.os.Build;
-import android.os.RemoteException;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.WorkerThread;
-import androidx.appcompat.app.AlertDialog;
-import androidx.fragment.app.FragmentActivity;
+import androidx.annotation.Nullable;
 
-import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.topjohnwu.superuser.Shell;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,27 +18,15 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
-import io.github.muntashirakon.AppManager.R;
 import io.github.muntashirakon.AppManager.logs.Log;
-import io.github.muntashirakon.AppManager.servermanager.LocalServer;
-import io.github.muntashirakon.AppManager.servermanager.ServerConfig;
-import io.github.muntashirakon.AppManager.settings.MainPreferences;
-import io.github.muntashirakon.AppManager.users.Users;
-import io.github.muntashirakon.AppManager.utils.AppPref;
-import io.github.muntashirakon.AppManager.utils.UIUtils;
-import io.github.muntashirakon.AppManager.utils.UiThreadHandler;
+import io.github.muntashirakon.AppManager.misc.NoOps;
 
-@SuppressWarnings("UnusedReturnValue")
 public final class RunnerUtils {
-    public static final String CMD_PM = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P ? "cmd package" : "pm";
+    public static final String TAG = RunnerUtils.class.getSimpleName();
 
-    public static final String CMD_INSTALL_EXISTING_PACKAGE = CMD_PM + " install-existing --user %s %s";
-    public static final String CMD_UNINSTALL_PACKAGE = CMD_PM + " uninstall -k --user %s %s";
-    public static final String CMD_UNINSTALL_PACKAGE_WITH_DATA = CMD_PM + " uninstall --user %s %s";
+    public static final String CMD_AM = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P ? "cmd activity" : "am";
+    public static final String CMD_PM = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P ? "cmd package" : "pm";
 
     private static final String EMPTY = "";
 
@@ -101,158 +86,39 @@ public final class RunnerUtils {
         return ESCAPE_XSI.translate(input);
     }
 
-    @NonNull
-    public static Runner.Result uninstallPackageUpdate(String packageName, int userHandle, boolean keepData) {
-        String cmd = String.format(keepData ? CMD_UNINSTALL_PACKAGE : CMD_UNINSTALL_PACKAGE_WITH_DATA, userHandleToUser(Users.USER_ALL), packageName) + " && "
-                + String.format(CMD_INSTALL_EXISTING_PACKAGE, userHandleToUser(userHandle), packageName);
-        return Runner.runCommand(cmd);
-    }
-
-    @NonNull
-    public static String userHandleToUser(int userHandle) {
-        if (userHandle == Users.USER_ALL) return "all";
-        else return String.valueOf(userHandle);
-    }
-
-    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
+    @NoOps
     public static boolean isRootGiven() {
-        if (isRootAvailable()) {
-            String output = Runner.runCommand(Runner.getRootInstance(), "echo AMRootTest").getOutput();
-            return output.contains("AMRootTest");
-        }
-        return false;
+        return Boolean.TRUE.equals(isAppGrantedRoot());
     }
 
+    @NoOps
     public static boolean isRootAvailable() {
+        return !Boolean.FALSE.equals(isAppGrantedRoot());
+    }
+
+    /**
+     * @see Shell#isAppGrantedRoot()
+     */
+    @Nullable
+    @NoOps
+    public static Boolean isAppGrantedRoot() {
+        if (Runner.getRootInstance().isRoot()) {
+            // Root granted
+            return true;
+        }
+        // Check if root is available
         String pathEnv = System.getenv("PATH");
-        if (pathEnv != null) {
-            for (String pathDir : pathEnv.split(":")) {
-                try {
-                    if (new File(pathDir, "su").exists()) {
-                        return true;
-                    }
-                } catch (NullPointerException ignore) {
-                }
+        Log.d(TAG, "PATH=%s", pathEnv);
+        if (pathEnv == null) return false;
+        for (String pathDir : pathEnv.split(":")) {
+            File suFile = new File(pathDir, "su");
+            Log.d(TAG, "SU(file=%s, exists=%s, executable=%s)", suFile, suFile.exists(), suFile.canExecute());
+            if (new File(pathDir, "su").canExecute()) {
+                // Root available but App Manager is not granted root
+                return null;
             }
         }
         return false;
-    }
-
-    @WorkerThread
-    private static void autoDetectRootOrAdb() {
-        // Update config
-        LocalServer.updateConfig();
-        // Check root, ADB and load am_local_server
-        if (!RunnerUtils.isRootGiven()) {
-            AppPref.set(AppPref.PrefKey.PREF_ROOT_MODE_ENABLED_BOOL, false);
-            // Check for adb
-            if (LocalServer.isAdbAvailable()) {
-                Log.e("ADB", "ADB available");
-                AppPref.set(AppPref.PrefKey.PREF_ADB_MODE_ENABLED_BOOL, true);
-            }
-            try {
-                LocalServer.restart();
-                if (!LocalServer.isAMServiceAlive()) {
-                    throw new IOException("ADB not available");
-                }
-                UiThreadHandler.run(() -> UIUtils.displayShortToast(R.string.working_on_adb_mode));
-            } catch (IOException | RemoteException e) {
-                Log.e("ADB", e);
-                AppPref.set(AppPref.PrefKey.PREF_ADB_MODE_ENABLED_BOOL, false);
-            }
-        } else {  // Root is available
-            AppPref.set(AppPref.PrefKey.PREF_ROOT_MODE_ENABLED_BOOL, true);
-            try {
-                LocalServer.restart();
-            } catch (RemoteException | IOException e) {
-                Log.e("ROOT", e);
-                AppPref.set(AppPref.PrefKey.PREF_ROOT_MODE_ENABLED_BOOL, false);
-            }
-        }
-    }
-
-    @WorkerThread
-    public static void setModeOfOps(FragmentActivity activity, boolean force) {
-        String mode = AppPref.getString(AppPref.PrefKey.PREF_MODE_OF_OPS_STR);
-        try {
-            if (!force) {
-                if (LocalServer.isAMServiceAlive()) {
-                    // Don't bother detecting root/ADB
-                    return;
-                } else if (!Runner.MODE_NO_ROOT.equals(mode) && LocalServer.isLocalServerAlive()) {
-                    // Remote server is running
-                    LocalServer.getInstance();
-                    return;
-                }
-            }
-            switch (mode) {
-                case Runner.MODE_AUTO:
-                    RunnerUtils.autoDetectRootOrAdb();
-                    return;
-                case Runner.MODE_ROOT:
-                    if (!isRootAvailable()) {
-                        throw new Exception("Root not available.");
-                    }
-                    AppPref.set(AppPref.PrefKey.PREF_ROOT_MODE_ENABLED_BOOL, true);
-                    AppPref.set(AppPref.PrefKey.PREF_ADB_MODE_ENABLED_BOOL, false);
-                    LocalServer.launchAmService();
-                    return;
-                case Runner.MODE_ADB_WIFI:
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        AppPref.set(AppPref.PrefKey.PREF_ROOT_MODE_ENABLED_BOOL, false);
-                        AppPref.set(AppPref.PrefKey.PREF_ADB_MODE_ENABLED_BOOL, true);
-                        CountDownLatch waitForConfig = new CountDownLatch(1);
-                        UiThreadHandler.run(() -> MainPreferences.displayAdbConnect(activity, waitForConfig));
-                        waitForConfig.await(2, TimeUnit.MINUTES);
-                        LocalServer.restart();
-                        return;
-                    } // else fallback to ADB over TCP
-                case "adb":
-                    if (mode.equals("adb")) {
-                        // Backward compatibility for v2.6.0
-                        AppPref.set(AppPref.PrefKey.PREF_MODE_OF_OPS_STR, Runner.MODE_ADB_OVER_TCP);
-                    }
-                    // fallback to ADB over TCP
-                case Runner.MODE_ADB_OVER_TCP:
-                    // Port is always 5555
-                    AppPref.set(AppPref.PrefKey.PREF_ROOT_MODE_ENABLED_BOOL, false);
-                    AppPref.set(AppPref.PrefKey.PREF_ADB_MODE_ENABLED_BOOL, true);
-                    ServerConfig.setAdbPort(ServerConfig.DEFAULT_ADB_PORT);
-                    LocalServer.updateConfig();
-                    LocalServer.restart();
-                    return;
-                case Runner.MODE_NO_ROOT:
-                    AppPref.set(AppPref.PrefKey.PREF_ROOT_MODE_ENABLED_BOOL, false);
-                    AppPref.set(AppPref.PrefKey.PREF_ADB_MODE_ENABLED_BOOL, false);
-            }
-        } catch (Exception e) {
-            Log.e("ModeOfOps", e);
-            CountDownLatch waitForInteraction = new CountDownLatch(1);
-            AtomicReference<AlertDialog> alertDialog = new AtomicReference<>();
-            UiThreadHandler.run(() -> alertDialog.set(new MaterialAlertDialogBuilder(activity)
-                    .setTitle(R.string.fallback_to_no_root_mode)
-                    .setMessage(R.string.fallback_to_no_root_mode_description)
-                    .setPositiveButton(R.string.yes, (dialog, which) -> {
-                        AppPref.set(AppPref.PrefKey.PREF_ROOT_MODE_ENABLED_BOOL, false);
-                        AppPref.set(AppPref.PrefKey.PREF_ADB_MODE_ENABLED_BOOL, false);
-                        waitForInteraction.countDown();
-                    })
-                    .setNegativeButton(R.string.no, (dialog, which) -> waitForInteraction.countDown())
-                    .setCancelable(false)
-                    .show()));
-            try {
-                waitForInteraction.await(2, TimeUnit.MINUTES);
-                if (waitForInteraction.getCount() == 1) {
-                    // Closed due to timeout: fallback to no-root by default
-                    AppPref.set(AppPref.PrefKey.PREF_ROOT_MODE_ENABLED_BOOL, false);
-                    AppPref.set(AppPref.PrefKey.PREF_ADB_MODE_ENABLED_BOOL, false);
-                    UiThreadHandler.run(() -> {
-                        if (alertDialog.get() != null) alertDialog.get().dismiss();
-                    });
-                }
-            } catch (InterruptedException ignore) {
-            }
-        }
     }
 
     /**
@@ -266,19 +132,19 @@ public final class RunnerUtils {
         /**
          * The mapping to be used in translation.
          */
-        private final Map<String, String> lookupMap;
+        private final Map<String, String> mLookupMap;
         /**
          * The first character of each key in the lookupMap.
          */
-        private final BitSet prefixSet;
+        private final BitSet mPrefixSet;
         /**
          * The length of the shortest key in the lookupMap.
          */
-        private final int shortest;
+        private final int mShortest;
         /**
          * The length of the longest key in the lookupMap.
          */
-        private final int longest;
+        private final int mLongest;
 
         /**
          * Define the lookup table to be used in translation
@@ -295,14 +161,14 @@ public final class RunnerUtils {
             if (lookupMap == null) {
                 throw new InvalidParameterException("lookupMap cannot be null");
             }
-            this.lookupMap = new HashMap<>();
-            this.prefixSet = new BitSet();
+            mLookupMap = new HashMap<>();
+            mPrefixSet = new BitSet();
             int currentShortest = Integer.MAX_VALUE;
             int currentLongest = 0;
 
             for (final Map.Entry<CharSequence, CharSequence> pair : lookupMap.entrySet()) {
-                this.lookupMap.put(pair.getKey().toString(), pair.getValue().toString());
-                this.prefixSet.set(pair.getKey().charAt(0));
+                mLookupMap.put(pair.getKey().toString(), pair.getValue().toString());
+                mPrefixSet.set(pair.getKey().charAt(0));
                 final int sz = pair.getKey().length();
                 if (sz < currentShortest) {
                     currentShortest = sz;
@@ -311,8 +177,8 @@ public final class RunnerUtils {
                     currentLongest = sz;
                 }
             }
-            this.shortest = currentShortest;
-            this.longest = currentLongest;
+            mShortest = currentShortest;
+            mLongest = currentLongest;
         }
 
         /**
@@ -329,15 +195,15 @@ public final class RunnerUtils {
          */
         public int translate(@NonNull final CharSequence input, final int index, final Writer out) throws IOException {
             // check if translation exists for the input at position index
-            if (prefixSet.get(input.charAt(index))) {
-                int max = longest;
-                if (index + longest > input.length()) {
+            if (mPrefixSet.get(input.charAt(index))) {
+                int max = mLongest;
+                if (index + mLongest > input.length()) {
                     max = input.length() - index;
                 }
                 // implement greedy algorithm by trying maximum match first
-                for (int i = max; i >= shortest; i--) {
+                for (int i = max; i >= mShortest; i--) {
                     final CharSequence subSeq = input.subSequence(index, index + i);
-                    final String result = lookupMap.get(subSeq.toString());
+                    final String result = mLookupMap.get(subSeq.toString());
 
                     if (result != null) {
                         out.write(result);

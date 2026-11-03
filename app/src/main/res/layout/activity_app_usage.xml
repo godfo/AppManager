@@ -1,7 +1,5 @@
-<?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<androidx.coordinatorlayout.widget.CoordinatorLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
@@ -10,78 +8,54 @@
 
     <include layout="@layout/appbar" />
 
-    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+    <io.github.muntashirakon.widget.SwipeRefreshLayout
         android:id="@+id/swipe_refresh"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         app:layout_behavior="com.google.android.material.appbar.AppBarLayout$ScrollingViewBehavior">
 
-        <androidx.core.widget.NestedScrollView
+        <androidx.appcompat.widget.LinearLayoutCompat
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:scrollbars="vertical">
+            android:orientation="vertical">
 
-            <androidx.appcompat.widget.LinearLayoutCompat
+            <io.github.muntashirakon.widget.MaterialSpinner
+                android:id="@+id/spinner"
+                style="@style/Widget.AppTheme.MaterialSpinner.Spinner.Small"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical|start"
+                android:layout_marginHorizontal="@dimen/padding_large"
+                android:layout_marginVertical="@dimen/padding_small"
+                android:fitsSystemWindows="true"
+                android:nextFocusDown="@id/recycler_view"
+                tools:hint="Interval" />
+
+            <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:orientation="vertical">
+                android:layout_height="match_parent">
 
-                <androidx.appcompat.widget.AppCompatSpinner
-                    android:id="@+id/spinner_interval"
-                    android:layout_width="130dp"
-                    android:layout_height="35sp"
-                    android:layout_gravity="center"
-                    android:layout_margin="@dimen/padding_large"
-                    android:focusable="true"
-                    android:nextFocusDown="@id/recycler_view"
-                    style="@style/AppTheme.Spinner" />
-
-                <androidx.appcompat.widget.AppCompatTextView
-                    android:id="@+id/time_used"
+                <io.github.muntashirakon.widget.RecyclerView
+                    android:id="@+id/scrollView"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:textSize="36sp"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:focusable="false"
-                    tools:text="@tools:sample/date/hhmm" />
+                    android:fitsSystemWindows="true"
+                    app:fastScrollerEnabled="true"
+                    tools:listitem="@layout/item_app_usage" />
 
-                <androidx.appcompat.widget.AppCompatTextView
-                    android:id="@+id/time_range"
+                <com.google.android.material.textview.MaterialTextView
+                    android:id="@android:id/empty"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginBottom="@dimen/padding_medium"
-                    android:gravity="center"
-                    android:textColor="?android:attr/textColorPrimary"
+                    android:layout_height="match_parent"
                     android:focusable="false"
-                    tools:text="@tools:sample/date/day_of_week" />
+                    android:gravity="center"
+                    android:text="@string/no_usage_in_this_time_range"
+                    tools:visibility="visible" />
 
-                <FrameLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent">
+            </FrameLayout>
 
-                    <io.github.muntashirakon.widget.RecyclerViewWithEmptyView
-                        android:id="@+id/recycler_view"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:overScrollMode="never"
-                        android:nextFocusUp="@id/spinner_interval"
-                        tools:listitem="@layout/item_app_usage" />
+        </androidx.appcompat.widget.LinearLayoutCompat>
 
-                    <androidx.appcompat.widget.AppCompatTextView
-                        android:id="@android:id/empty"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:gravity="center"
-                        android:focusable="false"
-                        android:text="@string/no_usage_in_this_time_range" />
-
-                </FrameLayout>
-
-            </androidx.appcompat.widget.LinearLayoutCompat>
-
-        </androidx.core.widget.NestedScrollView>
-
-    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+    </io.github.muntashirakon.widget.SwipeRefreshLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

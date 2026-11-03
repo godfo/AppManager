@@ -15,7 +15,8 @@ import java.io.InputStream;
 import java.util.HashMap;
 
 import io.github.muntashirakon.AppManager.rules.RuleType;
-import io.github.muntashirakon.io.ProxyFile;
+import io.github.muntashirakon.io.Path;
+import io.github.muntashirakon.io.Paths;
 
 import static org.junit.Assert.assertEquals;
 
@@ -26,7 +27,7 @@ public class ComponentUtilsTest {
     @Test
     public void getIFWRulesForPackage() {
         assert classLoader != null;
-        ProxyFile ifwDir = new ProxyFile(classLoader.getResource("ifw").getFile());
+        Path ifwDir = Paths.get(classLoader.getResource("ifw").getFile());
         HashMap<String, RuleType> expectedHashMap = getExpectedHashMap();
         HashMap<String, RuleType> actualHashMap = ComponentUtils.getIFWRulesForPackage("sample.package", ifwDir);
         assertEquals(expectedHashMap.size(), actualHashMap.size());

@@ -8,6 +8,7 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.IInterface;
 import android.os.RemoteException;
+import android.service.notification.StatusBarNotification;
 
 import androidx.annotation.RequiresApi;
 
@@ -26,6 +27,9 @@ public interface INotificationManager extends IInterface {
     }
 
     void setNotificationsEnabledForPackage(String pkg, int uid, boolean enabled) throws RemoteException;
+
+    // Added because there's no public API to get these notifications
+    StatusBarNotification[] getActiveNotifications(String callingPkg) throws RemoteException;
 
     /**
      * Updates the notification's enabled state. Additionally locks importance for all of the
@@ -55,11 +59,17 @@ public interface INotificationManager extends IInterface {
     @RequiresApi(Build.VERSION_CODES.O_MR1)
     void setNotificationListenerAccessGranted(ComponentName listener, boolean enabled) throws RemoteException;
 
+    @RequiresApi(Build.VERSION_CODES.S)
+    void setNotificationListenerAccessGranted(ComponentName listener, boolean enabled, boolean userSet) throws RemoteException;
+
     @RequiresApi(Build.VERSION_CODES.O_MR1)
     void setNotificationAssistantAccessGranted(ComponentName assistant, boolean enabled) throws RemoteException;
 
     @RequiresApi(Build.VERSION_CODES.O_MR1)
     void setNotificationListenerAccessGrantedForUser(ComponentName listener, int userId, boolean enabled) throws RemoteException;
+
+    @RequiresApi(Build.VERSION_CODES.S)
+    void setNotificationListenerAccessGrantedForUser(ComponentName listener, int userId, boolean enabled, boolean userSet) throws RemoteException;
 
     @RequiresApi(Build.VERSION_CODES.O_MR1)
     void setNotificationAssistantAccessGrantedForUser(ComponentName assistant, int userId, boolean enabled) throws RemoteException;

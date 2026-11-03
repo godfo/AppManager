@@ -2,22 +2,20 @@
 
 package io.github.muntashirakon.AppManager.profiles;
 
+import static io.github.muntashirakon.AppManager.profiles.ProfileApplierActivity.ST_ADVANCED;
+import static io.github.muntashirakon.AppManager.profiles.ProfileApplierActivity.ST_SIMPLE;
+import static io.github.muntashirakon.util.AdapterUtils.PAYLOAD_HIGHLIGHT_CHANGED;
+
 import android.content.Intent;
-import android.graphics.Color;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
-import android.os.RemoteException;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.BaseAdapter;
-import android.widget.Filter;
-import android.widget.Filterable;
-import android.widget.ListView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -26,6 +24,7 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.widget.PopupMenu;
 import androidx.core.content.ContextCompat;
 import androidx.lifecycle.ViewModelProvider;
+import androidx.recyclerview.widget.DiffUtil;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
@@ -36,48 +35,61 @@ import org.json.JSONException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 
 import io.github.muntashirakon.AppManager.BaseActivity;
 import io.github.muntashirakon.AppManager.R;
-import io.github.muntashirakon.AppManager.details.LauncherIconCreator;
 import io.github.muntashirakon.AppManager.logs.Log;
-import io.github.muntashirakon.AppManager.types.TextInputDialogBuilder;
-import io.github.muntashirakon.AppManager.utils.FileUtils;
+import io.github.muntashirakon.AppManager.profiles.struct.BaseProfile;
+import io.github.muntashirakon.AppManager.shortcut.CreateShortcutDialogFragment;
 import io.github.muntashirakon.AppManager.utils.UIUtils;
+import io.github.muntashirakon.AppManager.utils.Utils;
+import io.github.muntashirakon.AppManager.utils.appearance.ColorCodes;
+import io.github.muntashirakon.dialog.SearchableSingleChoiceDialogBuilder;
+import io.github.muntashirakon.dialog.TextInputDialogBuilder;
+import io.github.muntashirakon.io.Path;
+import io.github.muntashirakon.io.Paths;
+import io.github.muntashirakon.util.AdapterUtils;
+import io.github.muntashirakon.util.UiUtils;
+import io.github.muntashirakon.widget.RecyclerView;
 
-public class ProfilesActivity extends BaseActivity {
-    private static final String TAG = "ProfilesActivity";
+public class ProfilesActivity extends BaseActivity implements NewProfileDialogFragment.OnCreateNewProfileInterface {
+    private static final String TAG = ProfilesActivity.class.getSimpleName();
 
-    private ProfilesAdapter adapter;
-    private ProfilesViewModel model;
-    private LinearProgressIndicator progressIndicator;
+    private ProfilesAdapter mAdapter;
+    private ProfilesViewModel mModel;
+    private LinearProgressIndicator mProgressIndicator;
     @Nullable
-    private String profileName;
+    private String mProfileId;
 
-    private final ActivityResultLauncher<String> exportProfile = registerForActivityResult(
-            new ActivityResultContracts.CreateDocument(),
+    private final ActivityResultLauncher<String> mExportProfile = registerForActivityResult(
+            new ActivityResultContracts.CreateDocument("application/json"),
             uri -> {
                 if (uri == null) {
                     // Back button pressed.
                     return;
                 }
-                if (profileName != null) {
+                if (mProfileId != null) {
                     // Export profile
                     try (OutputStream os = getContentResolver().openOutputStream(uri)) {
-                        ProfileMetaManager manager = new ProfileMetaManager(profileName);
-                        manager.writeProfile(os);
-                        Toast.makeText(this, R.string.the_export_was_successful, Toast.LENGTH_SHORT).show();
+                        if (os == null) {
+                            return;
+                        }
+                        Path profilePath = ProfileManager.findProfilePathById(mProfileId);
+                        BaseProfile profile = BaseProfile.fromPath(profilePath);
+                        profile.write(os);
+                        UIUtils.displayShortToast(R.string.the_export_was_successful);
                     } catch (IOException | JSONException e) {
                         Log.e(TAG, "Error: ", e);
-                        Toast.makeText(this, R.string.export_failed, Toast.LENGTH_SHORT).show();
+                        UIUtils.displayShortToast(R.string.export_failed);
                     }
                 }
             });
-    private final ActivityResultLauncher<String> importProfile = registerForActivityResult(
+    private final ActivityResultLauncher<String> mImportProfile = registerForActivityResult(
             new ActivityResultContracts.GetContent(),
             uri -> {
                 if (uri == null) {
@@ -86,23 +98,21 @@ public class ProfilesActivity extends BaseActivity {
                 }
                 try {
                     // Verify
-                    String fileName = FileUtils.getFileName(getContentResolver(), uri);
-                    if (fileName == null) throw new IOException("File name cannot be empty.");
-                    fileName = FileUtils.trimExtension(fileName);
-                    String fileContent = FileUtils.getFileContent(getContentResolver(), uri);
-                    ProfileMetaManager manager = ProfileMetaManager.fromJSONString(fileName, fileContent);
+                    Path profilePath = Paths.get(uri);
+                    BaseProfile profile = BaseProfile.fromPath(profilePath);
+                    BaseProfile newProfile = BaseProfile.newProfile(profile.name, profile.type, profile);
+                    Path innerProfilePath = ProfileManager.requireProfilePathById(newProfile.profileId);
                     // Save
-                    manager.writeProfile();
-                    Toast.makeText(this, R.string.the_import_was_successful, Toast.LENGTH_SHORT).show();
-                    // Reload page
-                    new Thread(() -> model.loadProfiles()).start();
+                    try (OutputStream os = innerProfilePath.openOutputStream()) {
+                        newProfile.write(os);
+                    }
+                    ProfileManager.sendProfilesChangedBroadcast();
+                    UIUtils.displayShortToast(R.string.the_import_was_successful);
                     // Load imported profile
-                    Intent intent = new Intent(this, AppsProfileActivity.class);
-                    intent.putExtra(AppsProfileActivity.EXTRA_PROFILE_NAME, manager.getProfileName());
-                    startActivity(intent);
-                } catch (IOException | JSONException | RemoteException e) {
+                    startActivity(ProfileManager.getProfileIntent(this, newProfile.type, newProfile.profileId));
+                } catch (IOException | JSONException e) {
                     Log.e(TAG, "Error: ", e);
-                    Toast.makeText(this, R.string.import_failed, Toast.LENGTH_SHORT).show();
+                    UIUtils.displayShortToast(R.string.import_failed);
                 }
             });
 
@@ -110,39 +120,27 @@ public class ProfilesActivity extends BaseActivity {
     protected void onAuthenticated(@Nullable Bundle savedInstanceState) {
         setContentView(R.layout.activity_profiles);
         setSupportActionBar(findViewById(R.id.toolbar));
-        model = new ViewModelProvider(this).get(ProfilesViewModel.class);
-        progressIndicator = findViewById(R.id.progress_linear);
-        progressIndicator.setVisibilityAfterHide(View.GONE);
-        ListView listView = findViewById(android.R.id.list);
+        mModel = new ViewModelProvider(this).get(ProfilesViewModel.class);
+        mProgressIndicator = findViewById(R.id.progress_linear);
+        mProgressIndicator.setVisibilityAfterHide(View.GONE);
+        RecyclerView listView = findViewById(android.R.id.list);
+        listView.setLayoutManager(UIUtils.getGridLayoutAt450Dp(this));
         listView.setEmptyView(findViewById(android.R.id.empty));
-        adapter = new ProfilesAdapter(this);
-        listView.setAdapter(adapter);
+        UiUtils.applyWindowInsetsAsPaddingNoTop(listView);
+        mAdapter = new ProfilesAdapter(this);
+        listView.setAdapter(mAdapter);
         FloatingActionButton fab = findViewById(R.id.floatingActionButton);
-        fab.setOnClickListener(v -> new TextInputDialogBuilder(this, R.string.input_profile_name)
-                .setTitle(R.string.new_profile)
-                .setHelperText(R.string.input_profile_name_description)
-                .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(R.string.go, (dialog, which, profName, isChecked) -> {
-                    if (!TextUtils.isEmpty(profName)) {
-                        Intent intent = new Intent(this, AppsProfileActivity.class);
-                        //noinspection ConstantConditions
-                        intent.putExtra(AppsProfileActivity.EXTRA_NEW_PROFILE_NAME, profName.toString());
-                        intent.putExtra(AppsProfileActivity.EXTRA_NEW_PROFILE, true);
-                        startActivity(intent);
-                    }
-                })
-                .show());
-        model.getProfiles().observe(this, profiles -> {
-            progressIndicator.hide();
-            adapter.setDefaultList(profiles);
+        UiUtils.applyWindowInsetsAsMargin(fab);
+        fab.setOnClickListener(v -> {
+            NewProfileDialogFragment dialog = NewProfileDialogFragment.getInstance(this);
+            dialog.show(getSupportFragmentManager(), NewProfileDialogFragment.TAG);
         });
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        progressIndicator.show();
-        new Thread(() -> model.loadProfiles()).start();
+        mModel.getProfilesLiveData().observe(this, profiles -> {
+            mProgressIndicator.hide();
+            mAdapter.setMasterMap(profiles);
+        });
+        mProgressIndicator.show();
+        mModel.loadProfiles();
     }
 
     @Override
@@ -157,185 +155,201 @@ public class ProfilesActivity extends BaseActivity {
         if (id == android.R.id.home) {
             finish();
         } else if (id == R.id.action_import) {
-            importProfile.launch("application/json");
+            mImportProfile.launch("application/json");
         } else if (id == R.id.action_refresh) {
-            progressIndicator.show();
-            new Thread(() -> model.loadProfiles()).start();
-        } else if (id == R.id.action_presets) {
-            String[] profiles = getResources().getStringArray(R.array.profiles);
-            new MaterialAlertDialogBuilder(this)
-                    .setTitle(R.string.presets)
-                    .setItems(profiles, (dialog, which) -> {
-                        String profile = profiles[which];
-                        new TextInputDialogBuilder(this, R.string.input_profile_name)
-                                .setTitle(R.string.new_profile)
-                                .setHelperText(R.string.input_profile_name_description)
-                                .setNegativeButton(R.string.cancel, null)
-                                .setPositiveButton(R.string.go, (dialog1, which1, profName, isChecked) -> {
-                                    if (!TextUtils.isEmpty(profName)) {
-                                        Intent intent = new Intent(this, AppsProfileActivity.class);
-                                        intent.putExtra(AppsProfileActivity.EXTRA_PROFILE_NAME, profile);
-                                        //noinspection ConstantConditions
-                                        intent.putExtra(AppsProfileActivity.EXTRA_NEW_PROFILE_NAME, profName.toString());
-                                        intent.putExtra(AppsProfileActivity.EXTRA_NEW_PROFILE, true);
-                                        intent.putExtra(AppsProfileActivity.EXTRA_IS_PRESET, true);
-                                        startActivity(intent);
-                                    }
-                                })
-                                .show();
-                    })
-                    .setNegativeButton(R.string.close, null)
-                    .show();
+            mProgressIndicator.show();
+            mModel.loadProfiles();
         } else return super.onOptionsItemSelected(item);
         return true;
     }
 
-    static class ProfilesAdapter extends BaseAdapter implements Filterable {
-        private final LayoutInflater mLayoutInflater;
-        private Filter mFilter;
-        private String mConstraint;
-        private String[] mDefaultList;
-        private String[] mAdapterList;
-        private HashMap<String, String> mAdapterMap;
-        private final ProfilesActivity activity;
+    @Override
+    public void onCreateNewProfile(@NonNull String newProfileName, int type) {
+        Intent intent = ProfileManager.getNewProfileIntent(this, type, newProfileName);
+        startActivity(intent);
+    }
 
-        private final int mColorTransparent;
-        private final int mColorSemiTransparent;
-        private final int mColorRed;
+    static class ProfileItem {
+        @NonNull
+        final BaseProfile profile;
+        @NonNull
+        final CharSequence description;
 
-        static class ViewHolder {
-            TextView item_name;
-            TextView item_value;
+        ProfileItem(@NonNull BaseProfile profile, @NonNull CharSequence description) {
+            this.profile = profile;
+            this.description = description;
         }
+    }
+
+    static class ProfilesAdapter extends RecyclerView.ListAdapter<ProfileItem, ProfilesAdapter.ViewHolder> {
+        private final ProfilesActivity mActivity;
+        private final int mQueryStringHighlightColor;
+        private final List<ProfileItem> mMasterList = new ArrayList<>();
+        @Nullable
+        private String mConstraint;
+        private boolean isStartingSearch = false;
+        private boolean isClearingSearch = false;
+
+        private static final DiffUtil.ItemCallback<ProfileItem> DIFF_CALLBACK = new DiffUtil.ItemCallback<ProfileItem>() {
+            @Override
+            public boolean areItemsTheSame(@NonNull ProfileItem oldItem, @NonNull ProfileItem newItem) {
+                return Objects.equals(oldItem.profile.profileId, newItem.profile.profileId);
+            }
+
+            @Override
+            public boolean areContentsTheSame(@NonNull ProfileItem oldItem, @NonNull ProfileItem newItem) {
+                return Objects.equals(oldItem.profile.name, newItem.profile.name)
+                        && oldItem.profile.type == newItem.profile.type
+                        && Objects.equals(oldItem.description.toString(), newItem.description.toString());
+            }
+        };
 
         ProfilesAdapter(@NonNull ProfilesActivity activity) {
-            this.activity = activity;
-            mLayoutInflater = activity.getLayoutInflater();
-
-            mColorTransparent = Color.TRANSPARENT;
-            mColorSemiTransparent = ContextCompat.getColor(activity, R.color.semi_transparent);
-            mColorRed = ContextCompat.getColor(activity, R.color.red);
+            super(DIFF_CALLBACK);
+            mActivity = activity;
+            mQueryStringHighlightColor = ColorCodes.getQueryStringHighlightColor(activity);
         }
 
-        void setDefaultList(@NonNull HashMap<String, String> list) {
-            mDefaultList = list.keySet().toArray(new String[0]);
-            mAdapterList = mDefaultList;
-            mAdapterMap = list;
-            notifyDataSetChanged();
+        void setMasterMap(@NonNull HashMap<BaseProfile, CharSequence> map) {
+            mMasterList.clear();
+            for (Map.Entry<BaseProfile, CharSequence> entry : map.entrySet()) {
+                mMasterList.add(new ProfileItem(entry.getKey(), entry.getValue()));
+            }
+            isStartingSearch = false;
+            isClearingSearch = false;
+            dispatchFilteredList();
         }
 
-        @Override
-        public int getCount() {
-            return mAdapterList == null ? 0 : mAdapterList.length;
+        void setFilterConstraint(@Nullable String constraint) {
+            String oldConstraint = mConstraint;
+            mConstraint = TextUtils.isEmpty(constraint) ? null : constraint.toLowerCase(Locale.ROOT);
+            isStartingSearch = AdapterUtils.isStartingSearch(oldConstraint, mConstraint);
+            isClearingSearch = AdapterUtils.isClearingSearch(oldConstraint, mConstraint);
+            dispatchFilteredList();
+            if (!Objects.equals(oldConstraint, mConstraint)) {
+                notifyItemRangeChanged(0, getItemCount(), PAYLOAD_HIGHLIGHT_CHANGED);
+            }
         }
 
-        @Override
-        public String getItem(int position) {
-            return mAdapterList[position];
+        private void dispatchFilteredList() {
+            if (mConstraint == null || mConstraint.isEmpty()) {
+                submitListWithScrollState(new ArrayList<>(mMasterList), isStartingSearch, isClearingSearch);
+                return;
+            }
+            List<ProfileItem> filteredList = new ArrayList<>();
+            for (ProfileItem item : mMasterList) {
+                if (item.profile.name.toLowerCase(Locale.ROOT).contains(mConstraint)) {
+                    filteredList.add(item);
+                }
+            }
+            submitListWithScrollState(filteredList, isStartingSearch, isClearingSearch);
         }
 
         @Override
         public long getItemId(int position) {
-            return position;
+            return getItem(position).profile.profileId.hashCode();
+        }
+
+        @NonNull
+        @Override
+        public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            View view = LayoutInflater.from(parent.getContext()).inflate(io.github.muntashirakon.ui.R.layout.m3_preference, parent, false);
+            return new ViewHolder(view);
         }
 
         @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            ViewHolder viewHolder;
-            if (convertView == null) {
-                convertView = mLayoutInflater.inflate(R.layout.item_shared_pref, parent, false);
-                viewHolder = new ViewHolder();
-                viewHolder.item_name = convertView.findViewById(R.id.item_title);
-                viewHolder.item_value = convertView.findViewById(R.id.item_subtitle);
-                convertView.setTag(viewHolder);
-            } else {
-                viewHolder = (ViewHolder) convertView.getTag();
+        public void onBindViewHolder(@NonNull ViewHolder holder, int position, @NonNull List<Object> payloads) {
+            if (!payloads.isEmpty()) {
+                for (Object payload : payloads) {
+                    if (Objects.equals(payload, PAYLOAD_HIGHLIGHT_CHANGED)) {
+                        updateTextHighlights(holder, getItem(position));
+                        return;
+                    }
+                }
             }
-            String profName = mAdapterList[position];
-            if (mConstraint != null && profName.toLowerCase(Locale.ROOT).contains(mConstraint)) {
-                // Highlight searched query
-                viewHolder.item_name.setText(UIUtils.getHighlightedText(profName, mConstraint, mColorRed));
-            } else {
-                viewHolder.item_name.setText(profName);
-            }
-            Object value = mAdapterMap.get(profName);
-            String strValue = (value != null) ? value.toString() : "";
-            viewHolder.item_value.setText(strValue);
-            convertView.setBackgroundColor(position % 2 == 0 ? mColorSemiTransparent : mColorTransparent);
-            convertView.setOnClickListener(v -> {
-                Intent intent = new Intent(activity, AppsProfileActivity.class);
-                intent.putExtra(AppsProfileActivity.EXTRA_PROFILE_NAME, profName);
-                activity.startActivity(intent);
+            super.onBindViewHolder(holder, position, payloads);
+        }
+
+        private void updateTextHighlights(@NonNull ViewHolder holder, @NonNull ProfileItem item) {
+            // Highlight searched query
+            holder.title.setText(UIUtils.getHighlightedText(item.profile.name, mConstraint, mQueryStringHighlightColor));
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
+            ProfileItem profileItem = getItem(position);
+            BaseProfile profile = profileItem.profile;
+            // Highlight searched query
+            holder.title.setText(UIUtils.getHighlightedText(profile.name, mConstraint, mQueryStringHighlightColor));
+            holder.summary.setText(profileItem.description);
+            holder.itemView.setOnClickListener(v -> {
+                Intent intent = ProfileManager.getProfileIntent(mActivity, profile.type, profile.profileId);
+                mActivity.startActivity(intent);
             });
-            View finalConvertView = convertView;
-            convertView.setOnLongClickListener(v -> {
-                PopupMenu popupMenu = new PopupMenu(activity, finalConvertView);
+            holder.itemView.setOnLongClickListener(v -> {
+                PopupMenu popupMenu = new PopupMenu(mActivity, v);
+                popupMenu.setForceShowIcon(true);
                 popupMenu.inflate(R.menu.activity_profiles_popup_actions);
                 popupMenu.setOnMenuItemClickListener(item -> {
                     int id = item.getItemId();
                     if (id == R.id.action_apply) {
-                        final String[] statesL = new String[]{
-                                activity.getString(R.string.on),
-                                activity.getString(R.string.off)
-                        };
-                        @ProfileMetaManager.ProfileState final List<String> states = Arrays.asList(ProfileMetaManager.STATE_ON, ProfileMetaManager.STATE_OFF);
-                        new MaterialAlertDialogBuilder(activity)
-                                .setTitle(R.string.profile_state)
-                                .setSingleChoiceItems(statesL, -1, (dialog, which) -> {
-                                    Intent aIntent = new Intent(activity, ProfileApplierService.class);
-                                    aIntent.putExtra(ProfileApplierService.EXTRA_PROFILE_NAME, profName);
-                                    aIntent.putExtra(ProfileApplierService.EXTRA_PROFILE_STATE, states.get(which));
-                                    ContextCompat.startForegroundService(activity, aIntent);
-                                    dialog.dismiss();
+                        Intent intent = ProfileApplierActivity.getApplierIntent(mActivity, profile.profileId);
+                        mActivity.startActivity(intent);
+                    } else if (id == R.id.action_delete) {
+                        new MaterialAlertDialogBuilder(mActivity)
+                                .setTitle(mActivity.getString(R.string.delete_filename, profile.name))
+                                .setMessage(R.string.are_you_sure)
+                                .setPositiveButton(R.string.cancel, null)
+                                .setNegativeButton(R.string.ok, (dialog, which) -> {
+                                    if (ProfileManager.deleteProfile(profile.profileId)) {
+                                        UIUtils.displayShortToast(R.string.deleted_successfully);
+                                    } else {
+                                        UIUtils.displayShortToast(R.string.deletion_failed);
+                                    }
                                 })
                                 .show();
-                    } else if (id == R.id.action_delete) {
-                        ProfileMetaManager manager = new ProfileMetaManager(profName);
-                        if (manager.deleteProfile()) {
-                            Toast.makeText(activity, R.string.deleted_successfully, Toast.LENGTH_SHORT).show();
-                            new Thread(() -> activity.model.loadProfiles()).start();
-                        } else {
-                            Toast.makeText(activity, R.string.deletion_failed, Toast.LENGTH_SHORT).show();
-                        }
                     } else if (id == R.id.action_routine_ops) {
                         // TODO(7/11/20): Setup routine operations for this profile
-                        Toast.makeText(activity, "Not yet implemented", Toast.LENGTH_SHORT).show();
+                        UIUtils.displayShortToast("Not yet implemented");
                     } else if (id == R.id.action_duplicate) {
-                        new TextInputDialogBuilder(activity, R.string.input_profile_name)
+                        new TextInputDialogBuilder(mActivity, R.string.input_profile_name)
                                 .setTitle(R.string.new_profile)
                                 .setHelperText(R.string.input_profile_name_description)
                                 .setNegativeButton(R.string.cancel, null)
                                 .setPositiveButton(R.string.go, (dialog, which, newProfName, isChecked) -> {
                                     if (!TextUtils.isEmpty(newProfName)) {
-                                        Intent intent = new Intent(activity, AppsProfileActivity.class);
-                                        intent.putExtra(AppsProfileActivity.EXTRA_PROFILE_NAME, profName);
-                                        //noinspection ConstantConditions
-                                        intent.putExtra(AppsProfileActivity.EXTRA_NEW_PROFILE_NAME, newProfName.toString());
-                                        intent.putExtra(AppsProfileActivity.EXTRA_NEW_PROFILE, true);
-                                        activity.startActivity(intent);
+                                        Intent intent = ProfileManager.getCloneProfileIntent(
+                                                mActivity, profile.type, profile.profileId,
+                                                newProfName.toString());
+                                        mActivity.startActivity(intent);
                                     }
                                 })
                                 .show();
                     } else if (id == R.id.action_export) {
-                        activity.profileName = profName;
-                        activity.exportProfile.launch(profName + ".am.json");
+                        mActivity.mProfileId = profile.profileId;
+                        String filename = Paths.sanitizeFilename(profile.name + ".am.json", "_",
+                                Paths.SANITIZE_FLAG_FAT_ILLEGAL_CHARS | Paths.SANITIZE_FLAG_UNIX_RESERVED);
+                        mActivity.mExportProfile.launch(filename);
+                    } else if (id == R.id.action_copy) {
+                        Utils.copyToClipboard(mActivity, profile.name, profile.profileId);
                     } else if (id == R.id.action_shortcut) {
                         final String[] shortcutTypesL = new String[]{
-                                activity.getString(R.string.simple),
-                                activity.getString(R.string.advanced)
+                                mActivity.getString(R.string.simple),
+                                mActivity.getString(R.string.advanced)
                         };
-                        final String[] shortcutTypes = new String[]{AppsProfileActivity.ST_SIMPLE, AppsProfileActivity.ST_ADVANCED};
-                        new MaterialAlertDialogBuilder(activity)
-                                .setTitle(R.string.profile_state)
-                                .setSingleChoiceItems(shortcutTypesL, -1, (dialog, which) -> {
-                                    Intent intent = new Intent(activity, AppsProfileActivity.class);
-                                    intent.putExtra(AppsProfileActivity.EXTRA_PROFILE_NAME, profName);
-                                    intent.putExtra(AppsProfileActivity.EXTRA_SHORTCUT_TYPE, shortcutTypes[which]);
-                                    intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                                    LauncherIconCreator.createLauncherIcon(activity,
-                                            profName + " - " + shortcutTypesL[which], ContextCompat
-                                                    .getDrawable(activity, R.drawable.ic_launcher_foreground), intent);
+                        final String[] shortcutTypes = new String[]{ST_SIMPLE, ST_ADVANCED};
+                        new SearchableSingleChoiceDialogBuilder<>(mActivity, shortcutTypes, shortcutTypesL)
+                                .setTitle(R.string.create_shortcut)
+                                .setOnSingleChoiceClickListener((dialog, which, item1, isChecked) -> {
+                                    if (!isChecked) {
+                                        return;
+                                    }
+                                    Drawable icon = Objects.requireNonNull(ContextCompat.getDrawable(mActivity, R.drawable.ic_launcher_foreground));
+                                    ProfileShortcutInfo shortcutInfo = new ProfileShortcutInfo(profile.profileId,
+                                            profile.name, shortcutTypes[which], shortcutTypesL[which]);
+                                    shortcutInfo.setIcon(UIUtils.getBitmapFromDrawable(icon));
+                                    CreateShortcutDialogFragment dialog1 = CreateShortcutDialogFragment.getInstance(shortcutInfo);
+                                    dialog1.show(mActivity.getSupportFragmentManager(), CreateShortcutDialogFragment.TAG);
                                     dialog.dismiss();
                                 })
                                 .show();
@@ -345,46 +359,18 @@ public class ProfilesActivity extends BaseActivity {
                 popupMenu.show();
                 return true;
             });
-            return convertView;
         }
 
-        @Override
-        public Filter getFilter() {
-            if (mFilter == null)
-                mFilter = new Filter() {
-                    @Override
-                    protected FilterResults performFiltering(CharSequence charSequence) {
-                        String constraint = charSequence.toString().toLowerCase(Locale.ROOT);
-                        mConstraint = constraint;
-                        FilterResults filterResults = new FilterResults();
-                        if (constraint.length() == 0) {
-                            filterResults.count = 0;
-                            filterResults.values = null;
-                            return filterResults;
-                        }
+        static class ViewHolder extends RecyclerView.ViewHolder {
+            TextView title;
+            TextView summary;
 
-                        List<String> list = new ArrayList<>(mDefaultList.length);
-                        for (String item : mDefaultList) {
-                            if (item.toLowerCase(Locale.ROOT).contains(constraint))
-                                list.add(item);
-                        }
-
-                        filterResults.count = list.size();
-                        filterResults.values = list.toArray(new String[0]);
-                        return filterResults;
-                    }
-
-                    @Override
-                    protected void publishResults(CharSequence charSequence, FilterResults filterResults) {
-                        if (filterResults.values == null) {
-                            mAdapterList = mDefaultList;
-                        } else {
-                            mAdapterList = (String[]) filterResults.values;
-                        }
-                        notifyDataSetChanged();
-                    }
-                };
-            return mFilter;
+            public ViewHolder(@NonNull View itemView) {
+                super(itemView);
+                title = itemView.findViewById(android.R.id.title);
+                summary = itemView.findViewById(android.R.id.summary);
+                itemView.findViewById(R.id.icon_frame).setVisibility(View.GONE);
+            }
         }
     }
 }

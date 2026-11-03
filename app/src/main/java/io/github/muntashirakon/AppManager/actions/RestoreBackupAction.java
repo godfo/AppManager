@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package io.github.muntashirakon.AppManager.actions;
+
+import android.content.Context;
+import android.os.Parcel;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+import java.util.List;
+import java.util.UUID;
+
+import io.github.muntashirakon.AppManager.backup.BackupException;
+import io.github.muntashirakon.AppManager.backup.BackupManager;
+import io.github.muntashirakon.AppManager.batchops.struct.BatchBackupOptions;
+import io.github.muntashirakon.AppManager.R;
+import io.github.muntashirakon.AppManager.types.UserPackagePair;
+import io.github.muntashirakon.AppManager.utils.ContextUtils;
+import io.github.muntashirakon.AppManager.utils.PackageUtils;
+
+public final class RestoreBackupAction extends PackageScopedAction {
+    public RestoreBackupAction(@NonNull ActionTargetSpec target,
+                               @NonNull ActionParameters onParameters) {
+        this(UUID.randomUUID().toString(), null, CURRENT_SCHEMA_VERSION, target, onParameters,
+                Strictness.STRICT, RevertMode.NONE);
+    }
+
+    public RestoreBackupAction(@NonNull String id, @Nullable String name, int schemaVersion,
+                               @NonNull ActionTargetSpec target, @NonNull ActionParameters onParameters,
+                               @NonNull Strictness strictness, @NonNull RevertMode revertMode) {
+        super(id, name, schemaVersion, ActionKind.RESTORE_BACKUP, target, onParameters, null,
+                strictness, revertMode);
+    }
+
+    private RestoreBackupAction(@NonNull Parcel parcel, @NonNull ActionKind kind) {
+        super(parcel, kind);
+    }
+
+    @NonNull
+    static RestoreBackupAction fromParcel(@NonNull Parcel parcel, @NonNull ActionKind kind) {
+        return new RestoreBackupAction(parcel, kind);
+    }
+
+    private BatchBackupOptions mOptions;
+    private BackupManager mBackupManager;
+
+    @Override
+    protected void onPreExecute(@NonNull ActionContext context, @NonNull ActionMode mode,
+                                @NonNull List<UserPackagePair> targets,
+                                @NonNull List<ActionExecutionRecord> previousRecords) {
+        if (mode == ActionMode.OFF) return;
+        mOptions = createOptions(getOnParameters());
+        mBackupManager = new BackupManager();
+    }
+
+    @NonNull
+    @Override
+    protected ActionResult onExecute(@NonNull ActionContext context, @NonNull ActionMode mode,
+                                     @NonNull UserPackagePair target,
+                                     @NonNull List<ActionExecutionRecord> previousRecords)
+            throws BackupException {
+        Context ctx = ContextUtils.getContext();
+        CharSequence operationName = toLocalizedString(ctx);
+        // FIXME: 11/2/26 This always returns the package name if the app is not installed.
+        CharSequence appLabel = PackageUtils.getPackageLabel(ctx.getPackageManager(),
+                target.getPackageName(), target.getUserId());
+        CharSequence title = ctx.getString(R.string.restoring_app, appLabel);
+        try (SubProgressHandler subProgressHandler = newSubProgressHandler(context, target,
+                operationName, title)) {
+            mBackupManager.restore(mOptions.getRestoreOpOptions(target.getPackageName(),
+                    target.getUserId()), subProgressHandler);
+            return actionResult(target, ActionResultStatus.SUCCESS, null)
+                    .withRequiresRestart(mBackupManager.requiresRestart());
+        }
+    }
+
+    @NonNull
+    private BatchBackupOptions createOptions(@NonNull ActionParameters parameters) {
+        return new BatchBackupOptions(requireInt(parameters, "flags"),
+                optionalStringArray(parameters, "backup_names"),
+                optionalStringArray(parameters, "relative_dirs"));
+    }
+}

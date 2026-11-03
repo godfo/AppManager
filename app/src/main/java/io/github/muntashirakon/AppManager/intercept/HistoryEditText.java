@@ -3,25 +3,24 @@
 package io.github.muntashirakon.AppManager.intercept;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.SharedPreferences;
-import androidx.preference.PreferenceManager;
 import android.widget.ArrayAdapter;
 
 import androidx.annotation.NonNull;
-
-import com.google.android.material.textfield.MaterialAutoCompleteTextView;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import io.github.muntashirakon.AppManager.R;
-import io.github.muntashirakon.AppManager.types.NoFilterArrayAdapter;
+import io.github.muntashirakon.adapters.NoFilterArrayAdapter;
+import io.github.muntashirakon.widget.MaterialAutoCompleteTextView;
 
 public class HistoryEditText {
     private static final String DELIMITER = "';'";
     private static final int MAX_HISTORY_SIZE = 8;
-    private static final String HISTORY_PREFIX = "ActivityInterceptor_history_";
+    public static final String HISTORY_PREFIX = "ActivityInterceptor_history_";
+    public static final String HISTORY_PREFS_NAME = "activity_interceptor_history";
 
     private final Activity mContext;
     private final EditorHandler[] mEditorHandlers;
@@ -46,14 +45,19 @@ public class HistoryEditText {
         protected void showHistory() {
             List<String> items = getHistoryItems();
             ArrayAdapter<String> adapter = new NoFilterArrayAdapter<>(mContext,
-                    R.layout.item_checked_text_view, items);
+                    io.github.muntashirakon.ui.R.layout.auto_complete_dropdown_item, items);
             mEditor.setAdapter(adapter);
         }
 
         @NonNull
         private List<String> getHistoryItems() {
-            SharedPreferences sharedPref = PreferenceManager.getDefaultSharedPreferences(mContext);
+            SharedPreferences sharedPref = getHistoryPreferences();
             return getHistory(sharedPref);
+        }
+
+        @NonNull
+        private SharedPreferences getHistoryPreferences() {
+            return mContext.getSharedPreferences(HISTORY_PREFS_NAME, Context.MODE_PRIVATE);
         }
 
         @NonNull
@@ -116,7 +120,7 @@ public class HistoryEditText {
      * define history function for these editors
      */
     public HistoryEditText(@NonNull Activity context, @NonNull MaterialAutoCompleteTextView... editors) {
-        this.mContext = context;
+        mContext = context;
         mEditorHandlers = new EditorHandler[editors.length];
 
         for (int i = 0; i < editors.length; i++) {
@@ -132,7 +136,7 @@ public class HistoryEditText {
      * include current editor-content to history and save to settings
      */
     public void saveHistory() {
-        SharedPreferences sharedPref = PreferenceManager.getDefaultSharedPreferences(mContext);
+        SharedPreferences sharedPref = mContext.getSharedPreferences(HISTORY_PREFS_NAME, Context.MODE_PRIVATE);
         SharedPreferences.Editor edit = sharedPref.edit();
 
         for (EditorHandler instance : mEditorHandlers) {
@@ -144,7 +148,7 @@ public class HistoryEditText {
     @NonNull
     @Override
     public String toString() {
-        SharedPreferences sharedPref = PreferenceManager.getDefaultSharedPreferences(mContext);
+        SharedPreferences sharedPref = mContext.getSharedPreferences(HISTORY_PREFS_NAME, Context.MODE_PRIVATE);
         StringBuilder result = new StringBuilder();
         for (EditorHandler instance : mEditorHandlers) {
             result.append(instance.toString(sharedPref)).append("\n");

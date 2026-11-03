@@ -24,10 +24,8 @@
     <string name="memory_virtual_memory">Minne: %1$s, virtuelt minne: %2$s</string>
     <string name="kill_process">Drep</string>
     <string name="running_apps">Kjørende programmer</string>
-    <string name="store">Butikk</string>
     <string name="apk_updater">APK-oppdaterer</string>
     <string name="usage_yesterday">I går</string>
-    <string name="only_works_in_root_mode">Fungerer kun i rot-modus</string>
     <string name="app_settings">Innstillinger</string>
     <string name="app_size">Program</string>
     <string name="stopped">Stoppet</string>
@@ -48,16 +46,12 @@
     <string name="third_party">Tredjepartsbibliotek og ikoner</string>
     <string name="license">Lisens</string>
     <string name="icon_picker">Ikonvelger</string>
-    <string name="error_invalid_icon_format">Ugyldig ikonformat</string>
-    <string name="error_invalid_icon_resource">Ugyldig ikonressurs</string>
     <string name="class_name">Klassenavn</string>
     <string name="package_name">Pakkenavn</string>
     <string name="shortcut_name">Snarveisnavn</string>
-    <string name="edit_shortcut">Rediger snarvei</string>
     <string name="create_shortcut">Opprett snarvei</string>
     <string name="error_verbose_pin_shortcut">Nåværende oppstarter støtter ikke PinShortcut. Klarte ikke å opprette snarvei.</string>
     <string name="error_creating_shortcut">Klarte ikke å opprette snarvei</string>
-    <string name="instructions">Instruks</string>
     <string name="empty_package_name">Tomt pakkenavn</string>
     <string name="main_activity">Hovedaktivitet</string>
     <string name="user_id">Bruker-ID</string>
@@ -147,12 +141,11 @@
     <string name="data">Data</string>
     <string name="external_data">Ekstern data</string>
     <string name="blocking_rules">Blokkeringsregler</string>
-    <string name="whats_new">Hva er nytt\?</string>
+    <string name="whats_new">Hva er nytt?</string>
     <string name="features">Funksjoner</string>
     <string name="components">Komponenter</string>
     <string name="trackers">Sporere</string>
     <string name="installed_version">Installert versjon</string>
-    <string name="filter_disabled_apps">Avskrudde programmer</string>
     <string name="select_all">Velg alle</string>
     <string name="filter_apps_with_rules">Programmer med regler</string>
     <string name="filter_system_apps">Systemprogrammer</string>
@@ -230,10 +223,6 @@
         <item quantity="one">Kunne ikke avinstallere %1$d program</item>
         <item quantity="other">Kunne ikke avinstallere %1$d programmer</item>
     </plurals>
-    <plurals name="alert_failed_to_disable">
-        <item quantity="one">Kunne ikke skru av %1$d program</item>
-        <item quantity="other">Kunne ikke skru av %1$d programmer</item>
-    </plurals>
     <plurals name="failed_to_import_files">
         <item quantity="one">Kunne ikke importere %1$d fil.</item>
         <item quantity="other">Kunne ikke importere %1$d filer.</item>
@@ -255,7 +244,6 @@
     <string name="grant_usage_access">Innvilg brukstilgang</string>
     <string name="go_back">Gå tilbake</string>
     <string name="usage_less_than_a_minute">Mindre enn ett minutt</string>
-    <string name="usage_min">%1$d min</string>
     <plurals name="usage_hours">
         <item quantity="one">%1$d t</item>
         <item quantity="other">%1$d t</item>
@@ -274,13 +262,11 @@
     <string name="apps">Programmer</string>
     <string name="apply_now">Bruk nå…</string>
     <string name="no_profiles">Ingen profiler</string>
-    <string name="presets">Forhåndsinnstillinger</string>
     <string name="profiles">Profiler</string>
     <string name="open_pgp_provider">OpenPGP-tilbyder</string>
     <string name="cancel">Avbryt</string>
     <string name="ok">OK</string>
     <string name="input_backup_name">Sikkerhetskopinavn</string>
-    <string name="downgrade_not_possible">Nedgradering er ikke mulig uten rot-tilgang eller ADB</string>
     <string name="downgrade">Nedgrader</string>
     <string name="process_state_with_extra">Tilstand: <xliff:g id="process_state" example="Sleeping">%1$s</xliff:g> (<xliff:g id="state_extra" example="High priority">%2$s</xliff:g>)</string>
     <string name="process_state">Tilstand: <xliff:g id="process_state" example="Sleeping">%1$s</xliff:g></string>
@@ -317,7 +303,6 @@
         <item quantity="other">Kunne ikke sikkerhetskopiere %1$d programmer</item>
     </plurals>
     <string name="backup_options">Sikkerhetskopieringsinnstillinger</string>
-    <string name="failed_to_install_package_name">Kunne ikke installere <xliff:g id="app_name" example="App Manager">%1$s</xliff:g></string>
     <string name="package_name_is_installed_successfully"><xliff:g id="app_name" example="App Manager">%1$s</xliff:g> installert</string>
     <string name="termux">Termux</string>
     <string name="pref_import_existing">Importer eksisterende regler</string>
@@ -348,12 +333,9 @@
     <string name="external_multiple_data_dir">Ekstern datamappe <xliff:g id="dir_no" example="1">%1$d</xliff:g></string>
     <string name="external_data_dir">Ekstern datamappe</string>
     <string name="sort_by_blocked_components">Blokkerte først</string>
-    <string name="sort_by_disabled_app">Avskrudde først</string>
     <string name="exodus_link">εxodus-lenke</string>
     <string name="failed_to_stop">Kunne ikke stoppe <xliff:g id="app_name" example="App Manager">%1$s</xliff:g>.</string>
     <string name="force_stop">Tving stopp</string>
-    <string name="failed_to_enable">Kunne ikke skru på <xliff:g id="app_name" example="App Manager">%1$s</xliff:g>.</string>
-    <string name="failed_to_disable">Kunne ikke skru av <xliff:g id="app_name" example="App Manager">%1$s</xliff:g>.</string>
     <string name="enable">Skru på</string>
     <string name="disable">Skru av</string>
     <string name="no_content">Mangler innhold</string>
@@ -422,15 +404,20 @@
     <string name="debuggable">Avlusbar</string>
     <string name="credits_message">Til utviklerne av
 \n- Android Open Source-prosjektet
-\n- <a href="https://bitbucket.org/oF2pks/fdroid-applications-info">Apps_packages Info</a>
 \n- <a href="https://github.com/butzist/ActivityLauncher">Activity Launcher</a>
-\n- <a href="https://github.com/billthefarmer/editor">Editor</a>
+\n- <a href="https://bitbucket.org/oF2pks/fdroid-applications-info">Apps_packages Info</a>
 \n- <a href="https://github.com/zhaobao/AppsMonitor">AppsMonitor</a>
-\n- <a href="https://github.com/tuyafeng/Watt">Watt</a>
 \n- <a href="https://github.com/8enet/AppOpsX">AppOpsX</a>
+\n- <a href="https://github.com/billthefarmer/editor">Editor</a>
+\n- <a href="https://github.com/k3b/intent-intercept">Intent Intercept</a>
+\n- <a href="https://github.com/zhanghai/MaterialFiles">Material Files</a>
+\n- <a href="https://github.com/pluscubed/matlog">MatLog</a>
+\n- <a href="https://github.com/matrix-org/matrix-android-sdk">Matrix Android SDK</a>
+\n- <a href="https://github.com/jensstein/oandbackup">OAndBackup</a>
+\n- <a href="https://github.com/open-keychain/open-keychain">Open Keychain</a>
 \n- <a href="https://github.com/Aefyr/SAI">SAI</a>
 \n- <a href="https://github.com/RikkaApps/Shizuku">Shizuku</a>
-\n- <a href="https://github.com/pluscubed/matlog">MatLog</a>
+\n- <a href="https://github.com/tuyafeng/Watt">Watt</a>
 \nLogohenvisning: <a href="https://github.com/Atrate">Atrate</a>. </string>
     <string name="close">Lukk</string>
     <string name="user_profile_with_id">Profil: %1$s (%2$d)</string>
@@ -444,17 +431,11 @@
     <string name="aes">AES</string>
     <string name="encryption">Kryptering</string>
     <string name="select_user">Velg bruker</string>
-    <string name="pref_show_users_in_installer">Vis brukere i installasjonskandidat</string>
     <string name="new_profile">Ny profil</string>
     <string name="input_profile_name_description">Profilnavnet kan ikke inneholde mellomrom.</string>
     <string name="input_profile_name">Profilnavn</string>
     <string name="full_stop_tap_to_see_details">. Trykk for å se detaljer.</string>
     <string name="no_matching_package_found">Kunne ikke funne noe slik program</string>
-    <plurals name="alert_failed_to_enable">
-        <item quantity="one">Kunne ikke skru på %1$d program</item>
-        <item quantity="other">Kunne ikke skru på %1$d programmer</item>
-    </plurals>
-    <string name="cache">Utelukk hurtiglager</string>
     <string name="failed_packages">Feilede pakker</string>
     <string name="no_tracker_found">Fant ingen sporer</string>
     <string name="clear_app_cache_description">Tøm hurtiglager for alle programmer</string>
@@ -470,8 +451,6 @@
     <string name="export_blocking_rules">Eksporter blokkeringsregler</string>
     <string name="disable_background">Forhindre bakgrunnskjøring</string>
     <string name="found_trackers">Fant disse sporerne:</string>
-    <string name="tested_signatures_on_classes_and_time_taken">Testet <xliff:g id="signature_no" example="342">%1$d</xliff:g> signaturer på <xliff:g id="class_no" example="6000">%2$d</xliff:g> klasser.
-\nTidsforløp <xliff:g id="time" example="10000">%3$d</xliff:g> ms (<xliff:g id="iteration_no" example="100000">%4$d</xliff:g> gjentagelser).</string>
     <plurals name="other_trackers_and_classes">
         <item quantity="one"><xliff:g id="tracker_no" example="8">%1$d</xliff:g> sporere med <xliff:g id="class_no" example="50">%2$d</xliff:g> klasser</item>
         <item quantity="other"><xliff:g id="tracker_no" example="8">%1$d</xliff:g> sporere med <xliff:g id="class_no" example="50">%2$d</xliff:g> klasser</item>
@@ -494,7 +473,6 @@
     <string name="ecc">Elliptisk kurve-kryptografi</string>
     <string name="un_apkm">UnApkm</string>
     <string name="in_progress">Underveis</string>
-    <string name="packages">pakker</string>
     <string name="subject">Emne</string>
     <string name="confirm_installation">Bekreft installasjon</string>
     <string name="rules">Regler</string>
@@ -577,7 +555,7 @@
     <string name="failed_to_enable_op">Kunne ikke sette i verk forespurt app-operasjon</string>
     <string name="no_app_ops">Ingen app-operasjoner</string>
     <string name="app_ops">App-operasjoner</string>
-    <string name="total_size">Totalt</string>
+    <string name="total_size">Total</string>
     <string name="error_evaluating_input">Kunne ikke vurdere inngang</string>
     <string name="type_boolean">Sant/usant</string>
     <string name="long_integer_value">Lang heltallsverdi</string>
@@ -590,7 +568,6 @@
     </plurals>
     <string name="toggle_class_listing">Endre klasseliste</string>
     <string name="class_viewer">Klasse-betrakter</string>
-    <string name="insert_icon">Sett inn ikon</string>
     <string name="obb_size">Obb</string>
     <string name="sort_by_domain">Bruker-programmer først</string>
     <string name="uses_feature">Brukerfunksjoner</string>
@@ -619,7 +596,6 @@
     <string name="pref_export_msg">Eksporter blokkerings-regler innstilt innen App-manager til ekstern lagring.</string>
     <string name="reject_time">Avvis tid</string>
     <string name="accept_time">Godkjenn tid</string>
-    <string name="app_op_cannot_be_disabled">Denne app-operasjonen kan ikke skrus av. (Antagelig avhenger én skrivebeskyttet app-op av en annen.)</string>
     <string name="toggle_kill_for_system_apps">Aktiver eller deaktiver tvungen avslutning av system-apper</string>
     <plurals name="alert_failed_to_disable_background">
         <item quantity="one">Kufnne ikke hindre ett program fra å kjøre i bakgrunnen</item>
@@ -659,7 +635,7 @@
     <string name="pref_remove_all_rules_msg">Tilganger vil bli innvilget, app-operasjoner og komponenter vil tilbakestilles til sine forvalgte verdier.</string>
     <plurals name="alert_failed_to_set_app_ops">
         <item quantity="one">Kunne ikke sette app-operasjoner for ett program</item>
-        <item quantity="other">Kunne ikke sette app-operasjoner for %1$s programmer</item>
+        <item quantity="other">Kunne ikke sette app-operasjoner for %1$d programmer</item>
     </plurals>
     <string name="input_app_ops">Skriv inn app-operasjoner</string>
     <string name="uninstall_updates">Avinstaller oppgraderinger</string>
@@ -706,7 +682,6 @@
     </plurals>
     <string name="filter">Filtrer</string>
     <string name="filtered_packages">Filtrerte pakker</string>
-    <string name="block_components_description">Blokker alle komponenter identifisert av de gitte signaturene</string>
     <string name="block_unblock_trackers_description">Blokker eller avblokker reklame- og sporingskomponenter i alle de installerte programmene</string>
     <string name="pref_import_existing_msg">Legg til komponenter avskrudd av andre programmer i App Manager. Vær forsiktig med dette verktøyet, siden det kan være mange falske positiver. Velg kun programmene du er sikker på.</string>
     <string name="source_code_links">GitHub: https://github.com/MuntashirAkon/AppManager
@@ -720,7 +695,6 @@
     <string name="pem_file">PEM-fil</string>
     <string name="input_key_password">Nøkkelpassord</string>
     <string name="failed_to_load_key">Kunne ikke laste inn nøkkelen.</string>
-    <string name="default_key_used">Forvalgt nøkkel blir brukt.</string>
     <string name="key_not_set">Ikke satt.</string>
     <string name="use_default">Bruk forvalg</string>
     <string name="crypto_key_size">Nøkkelstørrelse</string>
@@ -741,9 +715,7 @@
     <string name="restore_not_installed">Gjenopprett ikke-installerte programmer</string>
     <string name="backup_custom_users">Egendefinerte brukere</string>
     <string name="failed_to_enable_magisk_hide">Kunne ikke skru på MagiskHide</string>
-    <string name="enable_magisk_hide">Skru på MagiskHide</string>
     <string name="failed_to_disable_magisk_hide">Kunne ikke skru av MagiskHide</string>
-    <string name="disable_magisk_hide">Skru av MagiskHide\?</string>
     <string name="window_size">Vindusstørrelse</string>
     <string name="refresh_rate">Oppfriskningsrate</string>
     <string name="scaling_factor">Skaleringsfaktor</string>
@@ -775,7 +747,6 @@
     <string name="pref_cat_configuration">Oppsett</string>
     <string name="pref_cat_appearance">Utseende</string>
     <string name="pref_cat_advanced">Avansert</string>
-    <string name="menu_title_partial_select">Lagre delvis</string>
     <string name="manage_saved_logs">Håndter lagrede logger</string>
     <string name="log_saved">Logg lagret.</string>
     <string name="filter_choice_tag">Etikett</string>
@@ -785,9 +756,8 @@
     <string name="enter_filename">Skriv inn filnavn …</string>
     <string name="delete_saved_log">Slett lagrede logger</string>
     <string name="copy_to_clipboard">Kopier til utklippstavle</string>
-    <string name="checkbox_never_show_partial_select_help">Ikke vis igjen</string>
-    <string name="keystore_pass">KeyStore-passord</string>
-    <string name="keystore_file">KeyStore-fil</string>
+    <string name="keystore_pass">Nøkkellager-passord</string>
+    <string name="keystore_file">Nøkkellager-fil</string>
     <string name="failed_to_initialize_key_store">Kunne ikke starte App Manager KeyStore.</string>
     <string name="add_to_profile">Legg til i profil</string>
     <string name="latest_backup">Siste sikkerhetskopi</string>
@@ -806,8 +776,6 @@
     <string name="text_filter_text">Filtertekst</string>
     <string name="text_filter_ellipsis">Filtrer …</string>
     <string name="subject_log_report">Loggrapport</string>
-    <string name="dialog_partial_select_explanation">1. Velg den <b>første</b> linjen.
-\n2. Velg så den <b>siste</b> linjen.</string>
     <string name="dialog_compiling_log">Kompilerer logg …</string>
     <plurals name="file_deletion_confirmation">
         <item quantity="one">Én fil vil bli slettet</item>
@@ -833,7 +801,6 @@
     <string name="backup_volume">Sikkerhetskopier dataområde</string>
     <string name="backup_extras_description">Sikkerhetskopier programtilganger, batterisparings- og databruksinnstillinger, MagiskHide-status, SSAID, osv.</string>
     <string name="app_signing_install_without_data_loss">Hvis du har skrudd av signaturbekreftelse kan du bruke <b>Kun installer</b>-valget for å installere programmet uten å miste data.</string>
-    <string name="profile_disable_msg">Skrur av eller på programmer basert på tilstand</string>
     <string name="usage_access_not_supported">Kunne ikke forespørre brukstilgang. Tilhørende innstillingsside finnes ikke.</string>
     <string name="rsa_exponent">Eksponent</string>
     <string name="pref_backup_flags_msg">Å legge til en forhåndsinnstilling for sikkerhetskopivalg lar deg unngå å velge flagg hver gang du sikkerhetskopierer/gjenoppretter.</string>
@@ -850,12 +817,10 @@
     <string name="pref_rules_msg">Umiddelbar blokkering, importer/eksporter/fjern regler, osv.</string>
     <string name="failed">Mislykket</string>
     <string name="orientation_follow_locale">Følg systemspråk</string>
-    <string name="pref_layout_orientation">Leseretning</string>
     <string name="hidden">Skjult</string>
     <string name="orientation_right_to_left">Høyre til venstre</string>
     <string name="orientation_left_to_right">Venstre til høyre</string>
     <string name="base_backup">Grunn-sikkerhetskopi</string>
-    <string name="save_log_zip">Lagre ZIP</string>
     <string name="widget_start_recording">Før opp
 \nlogg</string>
     <string name="widget_recording_in_progress">Fører opp …</string>
@@ -929,4 +894,289 @@
     <string name="import_from_oab">Importer fra OAndBackup</string>
     <string name="pref_import_backups">Importer sikkerhetskopier</string>
     <string name="expiry_date_cannot_be_empty">Utløpsdato kan ikke stå tom.</string>
+    <string name="pid">Prosess-ID</string>
+    <string name="pref_always_on_background">Installer i bakgrunnen</string>
+    <string name="next">Neste</string>
+    <string name="port_number_invalid">Ugyldig portnummer.</string>
+    <string name="netpolicy_disable_network_access">Skru av nettverkstilgang</string>
+    <string name="netpolicy_reject_wifi_data">Avslå Wi-Fi-data</string>
+    <string name="netpolicy_reject_vpn_data">Avslå VPN-data</string>
+    <string name="pref_import_backups_msg">Importer sikkerhetskopier fra OAndBackup, Swift Backup (3.0–3.2) eller Titanium Backup.</string>
+    <string name="port_number">Port</string>
+    <string name="minimum_version">Min. versjon: %d</string>
+    <string name="working_on_adb_mode">Arbeider i ADB-modus</string>
+    <string name="log_level_verbose">Sirlig</string>
+    <string name="open">Åpne</string>
+    <string name="input_signatures">Signaturer</string>
+    <string name="no_saved_logs">Fant ingen lagrede logger.</string>
+    <string name="input_signatures_description">Mellomromsinndelte programsignaturer , f.eks. <tt>org.y20k.transistor com.program2</tt> osv.</string>
+    <string name="keystore">Nøkkellager</string>
+    <string name="java_keystore">Java-nøkkellager (JKS)</string>
+    <string name="found_no_alias_in_keystore">Fant ingen alias i nøkkellager.</string>
+    <string name="wireless_debugging">Trådløs avlusning</string>
+    <string name="adb_connect">Koble til</string>
+    <string name="notice">Merknad</string>
+    <string name="failed_to_uninstall_app">Avinstallasjon mislyktes</string>
+    <string name="storage">Lagring</string>
+    <string name="error_with_details">Feil: %s</string>
+    <string name="files">Filer</string>
+    <string name="keystore_pass_cannot_be_empty">Nøkkellager-passord kan ikke være tomt.</string>
+    <string name="identifier">Identifikator</string>
+    <string name="paste">Lim inn</string>
+    <string name="background">Bakgrunn</string>
+    <string name="installer_app_installed">Program installert</string>
+    <string name="pref_thread_count">Parallell kjøring</string>
+    <string name="java">Java</string>
+    <string name="system_partition">Android-rot</string>
+    <string name="exit_confirmation">Avslutt bekreftelse</string>
+    <string name="extract">Pakk ut</string>
+    <string name="replace">Erstatt</string>
+    <string name="rename">Gi nytt navn</string>
+    <string name="type_uri_array_list">Liste over URI-er</string>
+    <string name="pkcs12_keystore">PKCS #12-nøkkellager (P12)</string>
+    <string name="failed_to_read_keystore">Kunne ikke lese nøkkellageret.</string>
+    <string name="pref_installer_msg">Sett opp programinstallatør-adferd</string>
+    <string name="bouncy_castle_keystore">Bouncy Castle-nøkkellager (BKS)</string>
+    <string name="restart_log_viewer_to_see_changes">Start loggviservinduet på ny for å vise endringer.</string>
+    <string name="notification_ticker">Loggføring startet</string>
+    <string name="notification_title">Loggfører …</string>
+    <string name="notification_subtext">Trykk for å stoppe opptak</string>
+    <string name="port_number_empty">Portnummeret er tomt.</string>
+    <string name="adb_connect_port_number_description">Portnummer er å finne under <b>IP-adresse og port</b>-delen, rett nedenfor <b>Enhetsnavn</b>.</string>
+    <string name="help_app_ops_tab">Klikk på et element for å <b>tillate</b> eller <b>ignorere</b> det. Lang-trykk på et element for å se dets andre støttede modi.</string>
+    <string name="help_permissions_tab">Disse tilgangene defineres av dette programmet og kan ikke tilbakekalles.</string>
+    <string name="failed_to_prevent_background_run">Kunne ikke forhindre %1$s fra å kjøre i bakgrunnen</string>
+    <string name="user_root">Bruk rot-tilgang</string>
+    <string name="import_from_sb">Importer fra Swift Backup 3.0 – 3.2</string>
+    <string name="pref_thread_count_hint">Verdien må være mellom 0 og %1$d der 0 betyr <i>maksimalt antall operasjoner ved angitt tidspunkt</i>.</string>
+    <string name="smali">Smali</string>
+    <string name="explore">Utforsk</string>
+    <string name="pref_filter_pattern_title">Filtrer ut etiketter</string>
+    <string name="pref_log_write_period_summary" tools:ignore="PluralsCandidate">Skriv til SD-kort ved opptak for hver %1$d linje.</string>
+    <string name="pref_show_timestamp_summary">Vis prosess-ID og tidsstempel når utvidet.</string>
+    <string name="search_type_contains">Inneholder</string>
+    <string name="toggle_internet">Bruk Internett</string>
+    <string name="vt_checking">VirusTotal: Sjekker …</string>
+    <string name="vt_uploading">VirusTotal: Laster opp …</string>
+    <string name="vt_queued">VirusTotal: I kø</string>
+    <string name="vt_failed">VirusTotal: Mislykket</string>
+    <string name="process_id">Prosess-ID</string>
+    <string name="parent_process_id">Overordnet prosess-ID</string>
+    <string name="virtual_memory">Virtuelt minne</string>
+    <string name="cpu_time">Prosessortid</string>
+    <string name="priority">Prioritet</string>
+    <string name="threads">Trådantall</string>
+    <string name="state">Behandlingstilstand</string>
+    <string name="commandline_args">Kommandolinjeargumenter</string>
+    <string name="swap">Sidevekslingsfil</string>
+    <string name="swap_chart_info">● %1$s brukt ● %2$s ledig</string>
+    <string name="hidden_api_enf_default_policy">Forvalg (basert på programtype)</string>
+    <string name="hidden_api_enf_policy_none">Ingen (full tilgang til det skjulte API-et)</string>
+    <string name="binary_32_bit">32-biter</string>
+    <string name="binary_64_bit">64-biter</string>
+    <string name="so_type_shared_library">Delt bibliotek</string>
+    <string name="so_type_executable">Kjørbar</string>
+    <plurals name="usage_seconds">
+        <item quantity="one">%1$d sek.</item>
+        <item quantity="other">%1$d sek.</item>
+    </plurals>
+    <plurals name="usage_minutes">
+        <item quantity="one">%1$d min.</item>
+        <item quantity="other">%1$d min.</item>
+    </plurals>
+    <string name="pref_filter_pattern_summary">Filtrer ut de valgte etikettene fra logger.</string>
+    <plurals name="toast_log_truncated">
+        <item quantity="one">Loggen er for stor. Viser siste linje.</item>
+        <item quantity="other">Loggen er for stor. Viser de siste %d linjene.</item>
+    </plurals>
+    <string name="vt_scan_date">Skanningsdato: %1$s</string>
+    <string name="vt_permalink">Permanent lenke til VirusTotal</string>
+    <string name="pref_import_backups_hint">Velg en mappe som inneholder sikkerhetskopifilene (Swift Backup/Titanium Backup) eller mapper (OAndBackup)</string>
+    <string name="vt_success">VirusTotal: %1$d/%2$d</string>
+    <string name="pref_vt_apikey">API-nøkkel for VirusTotal</string>
+    <string name="save_and_exit">Lagre og avslutt</string>
+    <string name="input_backup_name_description">Sikkerhetskopiens skal ikke begynne med et siffer og skal heller ikke inneholde mellomrom. La den stå tom hvis du vil bruke gjeldende dato-klokkeslett.</string>
+    <string name="dsa_affine_x">Affint x koordinat</string>
+    <string name="state_waking">Våkne, vekke</string>
+    <string name="rsa_modulus">Modulus</string>
+    <string name="dsa_affine_y">Affint y koordinat</string>
+    <string name="source_stamp_verified">Kildestempel godkjent.</string>
+    <string name="state_trace_stop">Sporingstopp</string>
+    <string name="batch_ops">Partielle handlinger, partielle operasjoner</string>
+    <string name="view_missing_signatures">Trykk for å se eller sende inn signaturer som ennå ikke finnes i App Managers database med biblioteker.</string>
+    <string name="state_zombie">Zombie</string>
+    <string name="input_permissions">Inndata tillatelser</string>
+    <string name="installer">Installer</string>
+    <string name="matching_activities">Samsvarende aktiviteter</string>
+    <string name="extras">Ekstra</string>
+    <string name="net_policy">Nettpraksis</string>
+    <string name="pref_block_trackers_msg">Blokker sporingskomponenter etter å ha installert et program ved bruk av App Manager.</string>
+    <string name="authenticating">Identitetsbekrefter …</string>
+    <plurals name="alert_failed_to_freeze">
+        <item quantity="one">Kunne ikke fryse %1$d program</item>
+        <item quantity="other">Kunne ikke fryse %1$d programmer</item>
+    </plurals>
+    <plurals name="alert_failed_to_unfreeze">
+        <item quantity="one">Kunne ikke tine %1$d program</item>
+        <item quantity="other">Kunne ikke tine %1$d programmer</item>
+    </plurals>
+    <string name="failed_to_change_app_op_mode">Kunne ikke endre program-op-modus.</string>
+    <string name="input_keystore_pass_msg">Trykk her for å skrive inn nøkkellager-passord</string>
+    <string name="trim_caches_in_all_apps_description">Sletter hurtiglagringsfiler fra alle programmer, inkludert Android-systemet</string>
+    <string name="vt_confirm_upload_and_scan">Ja, last opp og skann</string>
+    <string name="pref_backup_android_keystore">Sikkerhetskopier programmer med Android-nøkkellageret</string>
+    <string name="import_keystore">Importer nøkkellager</string>
+    <string name="pref_import_export_keystore">Importer/eksporter nøkkellager</string>
+    <string name="confirm_import_keystore">Vil du erstatte nøkkellageret\? Dette kan ikke angres.</string>
+    <string name="netpolicy_allow_background_data">Tillat bakgrunnsdata når datalagring er på</string>
+    <string name="netpolicy_reject_cellular_data">Avslå mobildata</string>
+    <string name="trim_caches_in_all_apps">Beskjær hurtiglagre i alle programmer</string>
+    <string name="adb_pair">Sammenkoble</string>
+    <string name="pref_always_on_background_msg">Alltid installer programmer i bakgrunnen og vis en merknad ved fullføring.</string>
+    <string name="pref_intent_firewall_description">Blokker komponenter kun ved bruk av intensjonsbrannmur. Ikke anbefalt siden noen programmer kan ta seg forbi brannmurer.</string>
+    <string name="pref_saved_apk_name_format">Lagre APK-navneformat</string>
+    <string name="endianness_big_endian">Viktigeste (byte) først</string>
+    <string name="endianness_little_endian">Minst viktige (byte) først</string>
+    <string name="hidden_api_enf_policy_black">Påtving (kun svartelister)</string>
+    <string name="hidden_api_enf_policy_dark_grey_and_black">Påtving (mørke-grå og svartelister)</string>
+    <string name="memory_chart_info">● %1$s Programmer ● %2$s Hurtiglagret ● %3$s Mellomlagre ● %4$s Ledig</string>
+    <string name="screen_time">Skjermtid</string>
+    <string name="sort_by_installation_date">Installasjonsdato</string>
+    <string name="tracker">Sporer</string>
+    <string name="item_select">Velg</string>
+    <string name="apk_checksums">APK-sjekksummer</string>
+    <string name="log_stop_recording">Stopp opptak</string>
+    <string name="frozen">Fryst</string>
+    <string name="usage_wifi_data">Wi-Fi-data</string>
+    <string name="usage_mobile_data">Mobildata</string>
+    <string name="usage_last_used">Sist brukt</string>
+    <string name="usage_times_opened">Ganger åpnet</string>
+    <string name="freeze">Frys</string>
+    <string name="restore_dots">Gjenopprett …</string>
+    <string name="backup_no_backups_present">Ingen sikkerhetskopier.</string>
+    <string name="unfreeze">Tin</string>
+    <string name="backup_apps_cannot_be_backed_up">Følgende programmer er ikke installerte og kunne ikke sikkerhetskopieres:</string>
+    <string name="restart_device">Omstart av enheten</string>
+    <string name="changelog_type_new">Ny</string>
+    <string name="changelog_type_fix">Fiks</string>
+    <string name="changelog_type_improve">Forbedret</string>
+    <string name="pref_sign_apk_no_signing_key">Ingen signeringsnøkkel</string>
+    <string name="failed_to_freeze">Kunne ikke fryse <xliff:g id="app_name" example="App Manager">%1$s</xliff:g>.</string>
+    <string name="freeze_unfreeze">Frys/tin</string>
+    <string name="failed_to_unfreeze">Kunne ikke tine <xliff:g id="app_name" example="App Manager">%1$s</xliff:g>.</string>
+    <string name="profile_freeze_msg">Fryser eller tiner programmer basert på tilstand</string>
+    <string name="pref_default_freezing_method">Forvalgt frysningsmetode</string>
+    <string name="pref_default_freezing_method_description">Metode å bruke som forvalg der det ikke er noe alternativ å velge frysningsmetode.</string>
+    <string name="hide_app">Skjul</string>
+    <string name="pref_privacy_description">Skjermlås, identitetsbekreftelse, osv.</string>
+    <string name="pref_privacy">Personvern</string>
+    <string name="pref_appearance_description">Drakt, sideretning, funksjoner, osv.</string>
+    <string name="filter_frozen_apps">Fryste programmer</string>
+    <string name="sort_by_frozen_app">Fryste først</string>
+    <string name="pref_version_changelog">Versjon/endringslogg</string>
+    <string name="get_help">Få hjelp</string>
+    <string name="user_manual">Brukermanual</string>
+    <string name="unknown_net_policy">Ukjent nettpraksis (%1$s - %2$X)</string>
+    <string name="pref_pure_black_theme">Svart drakt</string>
+    <string name="input_app_ops_description">Skriv inn programnavn og/eller konstanter inndelt med mellomrom, f.eks. <tt>WAKE_LOCK 63 72 CAMERA</tt> osv.</string>
+    <string name="shortcut_icon">Snarveisikon</string>
+    <string name="resend_intent">Send intensjon igjen</string>
+    <string name="input_keystore_pass">Skriv inn nøkkellager-passord</string>
+    <string name="set_package_name_first">Sett pakkenavn først.</string>
+    <string name="pref_backup_android_keystore_msg">Ikke alle programmer fungerer etter å ha blitt gjenopprettet. Å gjenopprette nøkkellageret fungerer ikke på de fleste enheter.</string>
+    <string name="set_app_op_mode">Sett program-op-modus</string>
+    <string name="invalid_password">Ugyldig passord. Prøv igjen.</string>
+    <string name="input_permissions_description">Skriv inn tilganger inndelt med mellomrom, f.eks. <tt>com.permission.GET_ACCOUNTS android.permission.ACCESS_MEDIA_LOCATION</tt> osv. Bruk <tt>*</tt> for å bruke for alle tilganger.</string>
+    <string name="has_net_policy">Nettpraksis</string>
+    <string name="input_keystore_alias_pass_description">Skriv inn passord for aliaset <b>%1$s</b>. Du kan la dette stå tomt hvis passordet er det samme som nøkkellager-passordet.</string>
+    <string name="input_app_ops_description_profile">Skriv inn op-navn og/eller konstanter, inndelt med mellomrom, f.eks. <tt>WAKE_LOCK 63 72 CAMERA</tt> osv. Bruk <tt>*</tt> for å bruke for allle oppsatte program-op-er.</string>
+    <string name="input_keystore_pass_description">Skriv inn nøkkellagerpassordet for App Manager. Hvis du ser dette for første gang bør du bruke en passordgenerator for å lage et trygt passord og lagre det på en sikker plass før du limer det inn her.</string>
+    <string name="paired_successfully">Sammenkoblet.</string>
+    <string name="netpolicy_reject_background_data">Avslå bakgrunnsdata</string>
+    <string name="pref_import_export_keystore_msg">Importer/eksporter Bouncy Castle-nøkkellageret (BKS) som brukes internt av App Manager.</string>
+    <string name="send_edited_intent">Send redigert intensjon</string>
+    <string name="warning_working_on_root_mode">Advarsel: Arbeider i rot-modus istedenfor ADB-modus.</string>
+    <string name="cpu_percent">%% prosessorbruk</string>
+    <string name="pref_default_blocking_method_description">Metode å bruke som forvalg der det ikke er noe alternativ for å velge en blokkeringsmetode.</string>
+    <string name="pref_default_blocking_method">Forvalgt blokkeringsmetode</string>
+    <string name="pref_intent_firewall_and_disable_description">Blokker komponenter ved bruk av intensjonsbrannmur og skru dem av. Anbefalt metode for rot-tilstandsbrukere.</string>
+    <string name="search_type_suffix">Endelse</string>
+    <string name="search_type_regular_expressions">Regulært uttrykk</string>
+    <string name="open_developer_options_page">Åpne utviklervalg i Android-innstillingene</string>
+    <string name="view_changelog">Finn ut hva som er nytt i denne utgaven</string>
+    <string name="unsupported_split_apk">Ustøttet</string>
+    <string name="sort_by_total_size">Total størrelse</string>
+    <string name="am_command">Kommandoen <tt>am</tt></string>
+    <string name="open_in_new_window">Nytt vindu</string>
+    <string name="internal">Intern</string>
+    <string name="external">Ekstern</string>
+    <string name="change_backup_volume">Endre dataområde</string>
+    <string name="help_uses_permissions_tab">Klikk på et element for å <b>innvilge</b> eller <b>tilbakekalle</b> det. Kun tilgangene <b>farlig</b> og <b>utvikling</b> kan innvilges eller tilbakekalles.</string>
+    <string name="keystore_password_info">Dette er App Manager-passordet for nøkkellageret. Lagre det på et sikkert sted hvis du vil sikkerhetskopiere/gjenopprette App Manager-nøkkellageret.<b>Denne meldingen vil ikke bli vist igjen.</b></string>
+    <string name="state_name">Tilstandsnavn (ST)</string>
+    <string name="troubleshooting">Feilsøking</string>
+    <string name="pref_advanced_pref">Brukere, APK-navneformat, samkjøring, osv.</string>
+    <string name="pref_sign_apk_error_signing_key_not_added">En gyldig signeringsnøkkel kreves for å signere en APK-fil.</string>
+    <string name="app_info_tag_open_links">Åpne lenker</string>
+    <string name="file_open_as">Åpne som …</string>
+    <string name="block_unblock_components_dots">Blokker/avblokker komponenter …</string>
+    <string name="unblock_components_dots">Avblokker komponenter …</string>
+    <string name="backup_extras">Ekstra</string>
+    <string name="file_open_with_custom_activity">Egendefinert</string>
+    <string name="open_as_text">Tekst</string>
+    <string name="open_as_image">Bilde</string>
+    <string name="open_as_video">Video</string>
+    <string name="open_as_archive">Arkiv</string>
+    <string name="open_as_folder">Mappe</string>
+    <string name="open_as_other">Annet</string>
+    <string name="delete_filename">Slett %s</string>
+    <string name="action_stop_service">Stopp</string>
+    <string name="export_app_list">Eksporter programliste</string>
+    <string name="export_option_markdown">Markdown</string>
+    <string name="export_app_list_select_format">Velg format for eksportering av programliste</string>
+    <string name="export_option_xml">XML</string>
+    <string name="redo">Gjenta</string>
+    <string name="debloat_removal_type">Type</string>
+    <string name="debloat_list_aosp">AOSP</string>
+    <string name="debloat_list_misc">Ymse</string>
+    <string name="installing_package">Installerer %1$s …</string>
+    <string name="backing_up_app">Sikkerhetskopierer %1$s …</string>
+    <string name="create_new_symbolic_link">Ny symbolsk lenke</string>
+    <string name="create_new_folder">Ny mappe</string>
+    <string name="create_new_file">Ny fil</string>
+    <string name="enter_symbolic_link_name">Lenkenavn</string>
+    <string name="enter_target_path">Målsti</string>
+    <string name="copy_these_paths">Kopier stier</string>
+    <string name="conflict_detected_while_copying">Konflikt oppdaget</string>
+    <string name="copied_successfully">Kopiert.</string>
+    <string name="failed_to_copy_specified_file">Kunne ikke kopiere «%1$s».</string>
+    <string name="change_mode">Endre modus</string>
+    <plurals name="search_results">
+        <item quantity="one">%d resultat</item>
+        <item quantity="other">%d resultater</item>
+    </plurals>
+    <string name="title_audio_player">Lydspiller</string>
+    <string name="copy_this_path">Kopier sti</string>
+    <string name="filter_force_stopped_apps">Stoppede programmer</string>
+    <string name="file_open_with_os_default_dialog">Åpne med OS-forvalgt dialog</string>
+    <string name="confirm_file_deletion">Ja, slett</string>
+    <string name="action_run">Kjør</string>
+    <string name="invalid_target_path">Ugyldig sti</string>
+    <plurals name="folder_count">
+        <item quantity="one">%d mappe</item>
+        <item quantity="other">%d mapper</item>
+    </plurals>
+    <string name="title_domains_supported_by_the_app">Støttede domener</string>
+    <string name="action_replace_all">Erstatt alle</string>
+    <string name="uninstall_app">Avinstaller %1$s</string>
+    <string name="title_confirm_deletion">Bekreft sletting</string>
+    <string name="debloat_removal_replace">Erstatt</string>
+    <plurals name="file_count">
+        <item quantity="one">%d fil</item>
+        <item quantity="other">%d filer</item>
+    </plurals>
+    <string name="restoring_app">Gjenoppretter %1$s …</string>
+    <string name="folder">Mappe</string>
+    <string name="symbolic_link">Symbolsk lenke</string>
+    <string name="moved_successfully">Flyttet</string>
 </resources>

@@ -2,34 +2,32 @@
 
 package io.github.muntashirakon.AppManager.server;
 
-import android.app.ActivityThread;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
 import android.system.Os;
 
+import androidx.annotation.NonNull;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Objects;
 
-import androidx.annotation.NonNull;
-import io.github.muntashirakon.AppManager.server.common.ConfigParam;
+import io.github.muntashirakon.AppManager.server.common.ConfigParams;
 import io.github.muntashirakon.AppManager.server.common.Constants;
 import io.github.muntashirakon.AppManager.server.common.FLog;
 
-import static io.github.muntashirakon.AppManager.server.common.ConfigParam.PARAM_TYPE;
-import static io.github.muntashirakon.AppManager.server.common.ConfigParam.PARAM_TYPE_ADB;
-import static io.github.muntashirakon.AppManager.server.common.ConfigParam.PARAM_TYPE_ROOT;
+import static io.github.muntashirakon.AppManager.server.common.ConfigParams.PARAM_CLASSPATH;
+import static io.github.muntashirakon.AppManager.server.common.ConfigParams.PARAM_UID;
 
 /**
  * ServerRunner runs the server based on the parameters given. It takes two arguments:
  * <ol>
  *     <li>
  *         <b>Parameters.</b> Each parameter is a key-value pair separated by a comma and key-values
- *         are separated by a colon. See {@link ConfigParam} to see a list of parameters.
+ *         are separated by a colon. See {@link ConfigParams} to see a list of parameters.
  *     </li>
  *     <li>
  *         <b>Process ID.</b> The old process ID that has to be killed. This is an optional argument
@@ -62,22 +60,25 @@ public final class ServerRunner {
             // Make it main looper
             //noinspection deprecation
             Looper.prepareMainLooper();
-            ActivityThread.systemMain();
+            Class.forName("android.app.ActivityThread")
+                    .getMethod("systemMain")
+                    .invoke(null);
             // Parse arguments
             String[] split = paramsStr.split(",");
-            final Map<String, String> params = new HashMap<>();
+            final ConfigParams configParams = new ConfigParams();
             for (String s : split) {
                 String[] param = s.split(":");
-                params.put(param[0], param[1]);
+                configParams.put(param[0], param[1]);
             }
-            params.put(PARAM_TYPE, Process.myUid() == 0 ? PARAM_TYPE_ROOT : PARAM_TYPE_ADB);
+            configParams.put(PARAM_UID, "" + Process.myUid());
+            configParams.put(PARAM_CLASSPATH, Objects.requireNonNull(System.getenv("CLASSPATH")));
             // Set server info
-            LifecycleAgent.serverRunInfo.startArgs = paramsStr;
-            LifecycleAgent.serverRunInfo.startTime = System.currentTimeMillis();
-            LifecycleAgent.serverRunInfo.startRealTime = SystemClock.elapsedRealtime();
+            LifecycleAgent.sServerInfo.startArgs = paramsStr;
+            LifecycleAgent.sServerInfo.startTime = System.currentTimeMillis();
+            LifecycleAgent.sServerInfo.startRealTime = SystemClock.elapsedRealtime();
             // Print debug
-            System.out.println("Type: " + params.get(PARAM_TYPE) + ", UID: " + Process.myUid());
-            System.out.println("Params: " + params);
+            System.out.println("UID: " + configParams.getUid() + ", UID: " + Process.myUid());
+            System.out.println("Params: " + configParams);
             // Kill old server if requested
             if (oldPid != -1) {
                 killOldServer(oldPid);
@@ -85,7 +86,7 @@ public final class ServerRunner {
             }
             // Start server
             Thread thread = new Thread(() -> {
-                new ServerRunner().runServer(params);
+                new ServerRunner().runServer(configParams);
                 // Exit current thread, regardless of whether the server started or not
                 FLog.close();
                 killSelfProcess();
@@ -186,22 +187,22 @@ public final class ServerRunner {
      *
      * @param configParams The parameters to be used during and after the server starts.
      */
-    private void runServer(Map<String, String> configParams) {
-        try (ServerHandler serverHandler = new ServerHandler(configParams)) {
-            // Set params
-            LifecycleAgent.sConfigParams = new HashMap<>(configParams);
-            System.out.println("Server has started.");
+    private void runServer(@NonNull ConfigParams configParams) {
+        LifecycleAgent lifecycleAgent = new LifecycleAgent(configParams);
+        try (ServerHandler serverHandler = new ServerHandler(lifecycleAgent)) {
+            System.out.println("Success! Server has started.");
             int pid = Process.myPid();
             System.out.println("Process: " + getProcessName(pid) + ", PID: " + pid);
             // Send broadcast message to the system that the server has started
-            LifecycleAgent.onStarted();
+            lifecycleAgent.onStarted();
             // Start server
             serverHandler.start();
         } catch (IOException | RuntimeException e) {
+            System.out.println("Error! Could not start server. " + e.getMessage());
             FLog.log(e);
         } finally {
             // Send broadcast message to the system that the server has stopped
-            LifecycleAgent.onStopped();
+            lifecycleAgent.onStopped();
         }
     }
 }

@@ -1,105 +1,126 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-apply from: "$gradle.ext.appManagerRoot/common.gradle"
+
+import javax.inject.Inject
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.util.stream.Collectors
+
+plugins {
+    id('com.android.library')
+}
+
+android {
+    namespace 'io.github.muntashirakon.AppManager.server'
+    compileSdk compile_sdk
+    buildToolsVersion = build_tools
+
+    defaultConfig {
+        minSdk min_sdk
+        targetSdk target_sdk
+    }
+
+    compileOptions {
+        encoding "UTF-8"
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
 
 dependencies {
     compileOnly project(path: ':hiddenapi')
+
     api project(path: ':libserver')
+
+    implementation "androidx.annotation:annotation:${annotation_version}"
 }
 
-static def toPath(String s) {
-    if (isWin()) {
-        return s.replace('/', '\\')
-    } else {
-        return s
-    }
+// https://docs.gradle.org/current/userguide/service_injection.html#execoperations
+interface InjectedExecOps {
+    @Inject
+    ExecOperations getExecOps()
 }
 
-static def isWin() {
-    return org.gradle.internal.os.OperatingSystem.current().isWindows()
-}
+android.libraryVariants.configureEach { variant ->
+    String buildType = variant.buildType.name
+    String buildTypeCap = buildType.capitalize()
+    def compileTask = variant.javaCompileProvider
+    def libServerCompileTask = project(':libserver').tasks.named("compile${buildTypeCap}JavaWithJavac")
+    def injected = project.objects.newInstance(InjectedExecOps)
+    tasks.register("create${buildTypeCap}ServerJars") {
+        inputs.dir(compileTask.map { it.destinationDirectory.get() })
+        inputs.dir(libServerCompileTask.map { it.destinationDirectory.get() })
 
-String.metaClass.toPath = { -> toPath(delegate) }
+        String serverPkg = "io/github/muntashirakon/AppManager/server"
+        String srcDir = buildType == "release" ? "main" : buildType
+        File assetsDir = file("${project.rootDir}/app/src/${srcDir}/assets")
+        File amJar = new File(assetsDir, "am.jar")
+        File mainJar = new File(assetsDir, "main.jar")
 
-ext {
-    debugClassDir = project.rootDir.absolutePath + '/server/build/intermediates/javac/debug/classes'.toPath()
-    libserverClassDir = project.rootDir.absolutePath + '/libserver/build/intermediates/javac/debug/classes'.toPath()
-    hiddenApiClassDir = project.rootDir.absolutePath + '/hiddenapi/build/classes/java/main'.toPath()
-    amJar = project.rootDir.absolutePath + '/app/src/main/assets/am.jar'.toPath()
-    mainJar = project.rootDir.absolutePath + '/app/src/main/assets/main.jar'.toPath()
-}
+        outputs.file(amJar)
+        outputs.file(mainJar)
 
-build.doLast {
-    if (!isModified()) {
-        println("Files aren't modified, skip creating jar files.")
-        return
-    }
-    println("Build success, creating am.jar...")
-    def buildArgs = ['--release', '--output', amJar]
-    buildArgs.addAll(get_args(libserverClassDir, ["io/github/muntashirakon/AppManager/server/common/"]))
-    buildArgs.addAll(get_args(debugClassDir,  ["io/github/muntashirakon/AppManager/server/"]))
-    buildArgs.addAll(hiddenApiClassDir +  "/android/app/ActivityThread.class")
-    buildArgs.addAll(['--lib', "${android.sdkDirectory.path}/platforms/android-${rootProject.ext.targetSdk}/android.jar"])
-    exec {
-        workingDir = project.rootDir
-        executable = file("${android.sdkDirectory.path}/build-tools/${android.buildToolsVersion}/d8${isWin() ? '.bat' : ''}".toPath())
-        args = buildArgs
-    }
-    println("Created ${amJar}")
-    println("Creating main.jar...")
-    buildArgs = ['--release', '--output', mainJar]
-    buildArgs.add("${debugClassDir}/io/github/muntashirakon/AppManager/server/IPCMain.class")
-    buildArgs.add("${libserverClassDir}/io/github/muntashirakon/AppManager/server/common/ServerUtils.class")
-    buildArgs.addAll(['--lib', "${android.sdkDirectory.path}/platforms/android-${rootProject.ext.targetSdk}/android.jar"])
-    exec {
-        workingDir = project.rootDir
-        executable = file("${android.sdkDirectory.path}/build-tools/${android.buildToolsVersion}/d8${isWin() ? '.bat' : ''}".toPath())
-        args = buildArgs
-    }
-    println("Created ${mainJar}")
-}
+        doLast {
+            println("Building Server JARs for type: ${buildType}")
+            assetsDir.mkdirs()
 
-def isModified() {
-    def stdout = new ByteArrayOutputStream()
-    exec {
-        workingDir = project.rootDir
-        executable = "${project.rootDir}/scripts/check_am_server.sh"
-        standardOutput = stdout
-    }
-    return stdout.toString().trim() == "M"
-}
+            String serverClassDir = compileTask.get().destinationDirectory.get().asFile.absolutePath
+            String libserverClassDir = libServerCompileTask.get().destinationDirectory.get().asFile.absolutePath + "/${serverPkg}/common"
 
-def get_args(String path, List pkgPath) {
-    def ret = []
-    pkgPath.forEach {
-        it ->
-            def file = new File(path, it.toPath())
-            loadClsFiles(file, ret)
-    }
-    return ret
-}
+            String androidJar = "${android.sdkDirectory.path}/platforms/android-${target_sdk}/android.jar"
+            String d8Path = "${android.sdkDirectory.path}/build-tools/${android.buildToolsVersion}/d8"
+            // Make sure the build script and d8 use the same version of java.
+            String gradleJavaHome = System.getProperty("java.home")
+            File gradleJava = new File(gradleJavaHome, "bin/java")
+            if (!gradleJava.isFile()) {
+                gradleJavaHome = new File(gradleJavaHome).parent
+            }
+            String gradlePath = "${gradleJavaHome}/bin:${System.getenv('PATH')}"
 
-def loadClsFiles(File f, List paths) {
-    File[] files = f.listFiles()
-    if (files != null) {
-        files.each {
-            file ->
-                if (file.file) {
-                    if (file.name.endsWith(".class") && !file.name.startsWith("IPCMain")) {
-                        paths.add(file.path)
-                    }
-                } else {
-                    loadClsFiles(file, paths)
+            def runD8 = { List<String> args ->
+                injected.execOps.exec {
+                    environment "JAVA_HOME", gradleJavaHome
+                    environment "PATH", gradlePath
+                    executable = d8Path
+                    it.args(args)
                 }
+            }
+
+            println("Creating am.jar...")
+            def amArgs = ['--release', '--min-api', min_sdk, '--output', amJar.absolutePath, '--lib', androidJar]
+            amArgs.addAll(Files.list(Paths.get(libserverClassDir)).filter {
+                !it.fileName.toString().startsWith("IRootServiceManager")
+            }.map { it.toString() }.sorted().collect(Collectors.toList()))
+            amArgs.addAll(Files.list(Paths.get("${serverClassDir}/${serverPkg}")).filter {
+                !it.fileName.toString().startsWith("RootServiceMain") && Files.isRegularFile(it)
+            }.map { it.toString() }.sorted().collect(Collectors.toList()))
+            runD8(amArgs)
+            println("Created ${amJar}")
+
+            println("Creating main.jar...")
+            def mainArgs = ['--release', '--min-api', min_sdk, '--output', mainJar.absolutePath, '--lib', androidJar]
+            mainArgs.addAll(Files.list(Paths.get(libserverClassDir)).filter {
+                it.fileName.toString().startsWith("IRootServiceManager") || it.fileName.toString().startsWith("ServerUtils")
+            }.map { it.toString() }.sorted().collect(Collectors.toList()))
+            mainArgs.addAll(Files.list(Paths.get("${serverClassDir}/${serverPkg}")).filter {
+                it.fileName.toString().startsWith("RootServiceMain") && Files.isRegularFile(it)
+            }.map { it.toString() }.sorted().collect(Collectors.toList()))
+            runD8(mainArgs)
+            println("Created ${mainJar}")
         }
     }
+
+    compileTask.configure { finalizedBy("create${buildTypeCap}ServerJars") }
 }
 
-task cleanupJar() {
+tasks.register('cleanupServerJars') {
     doLast {
-        file("${rootProject.projectDir.absolutePath}/app/src/main/assets/am.jar").delete()
-        file("${rootProject.projectDir.absolutePath}/app/src/main/assets/main.jar").delete()
+        String rootDir = rootProject.projectDir.absolutePath
+        file("${rootDir}/app/src/main/assets/am.jar").delete()
+        file("${rootDir}/app/src/main/assets/main.jar").delete()
+        file("${rootDir}/app/src/debug/assets/am.jar").delete()
+        file("${rootDir}/app/src/debug/assets/main.jar").delete()
     }
 }
 
-clean.dependsOn cleanupJar
+clean.dependsOn cleanupServerJars

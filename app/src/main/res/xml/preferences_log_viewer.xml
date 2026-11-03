@@ -2,17 +2,24 @@
 <PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <io.github.muntashirakon.preference.TopSwitchPreference
+        app:key="use_log_viewer"
+        app:title="@string/pref_use_log_viewer"
+        app:persistent="false"
+        app:iconSpaceReserved="false" />
+
     <PreferenceCategory
+        app:key="cat_appearance"
         app:title="@string/pref_cat_appearance"
         app:iconSpaceReserved="false">
 
-        <SwitchPreference
+        <SwitchPreferenceCompat
             app:key="log_viewer_expand_by_default"
             app:summary="@string/pref_expanded_by_default_summary"
             app:title="@string/pref_expanded_by_default_title"
             app:iconSpaceReserved="false" />
 
-        <SwitchPreference
+        <SwitchPreferenceCompat
             app:key="log_viewer_show_pid_tid_timestamp"
             app:summary="@string/pref_show_timestamp_summary"
             app:title="@string/pref_show_timestamp_title"
@@ -21,6 +28,7 @@
     </PreferenceCategory>
 
     <PreferenceCategory
+        app:key="cat_conf"
         app:title="@string/pref_cat_configuration"
         app:iconSpaceReserved="false" >
 
@@ -39,6 +47,7 @@
     </PreferenceCategory>
 
     <PreferenceCategory
+        app:key="cat_advanced"
         app:title="@string/pref_cat_advanced"
         app:iconSpaceReserved="false" >
 
@@ -60,7 +69,7 @@
             app:summary="@string/pref_filter_pattern_summary"
             app:iconSpaceReserved="false" />
 
-        <SwitchPreference
+        <SwitchPreferenceCompat
             app:key="log_viewer_omit_sensitive_info"
             app:title="@string/omit_sensitive_info"
             app:summary="@string/omit_sensitive_info_summary"

@@ -7,11 +7,11 @@ Building App Manager
 Requirements
 ============
 
-* **Hardware:** Any computer with 4GB RAM (8GB recommended)
-* **Operating system:** Linux/macOS (no support for Windows)
-* **Software:** Android Studio, Gradle
+* **Hardware:** Any computer with 8 GB RAM and 20 GB storage
+* **Operating system:** Linux/macOS/WSL
+* **Software:** Android Studio/IntelliJ IDEA, Gradle, Latex, pandoc, JDK 17+
 * **Active network connection:** Depending on your development environment,
-  this may cross 10 Gigabytes of data.
+  you may need at least 20 GB data package.
 
 macOS
 =====
@@ -44,16 +44,17 @@ Linux|GNU
       sudo pacman -S base-devel
 
 - Install `bundletool-all.jar`_ if you want to build APKS, and make sure it is
-  available as ``bundletool`` command.  A quick way would be to create a file
-  ``bundletool`` in ``/usr/local/bin`` directory with the following content::
+  available as ``bundletool`` command.  A quick way would be to create an alias
+  as follows (assuming you're using ``bash``)::
 
-    #!/usr/bin/env bash
-    exec java -jar "/path/to/bundletool-all.jar" "$@"
+    echo "alias bundletool='java -jar path/to/bundletool.jar'" >> ~/.bashrc
 
   Make sure to replace ``/path/to/bundletool-all.jar`` with the actual path for
-  **bundletool-all.jar**.  Also, make the file executable::
+  **bundletool-all.jar**.
 
-    chmod +x /usr/local/bin/bundletool
+  * For Arch/Artix/Majaro (with ``yay``)::
+
+      yay -S bundletool
 
 
 Clone and Build App Manager
@@ -80,11 +81,16 @@ Create Bundled App
 
 To create a bundled app in APKS format, run the following command::
 
-  ./scripts/aab_to_apks.sh preRelease
+  ./scripts/aab_to_apks.sh type
 
-Replace ``prePelease`` with ``release`` or ``debug`` based on your
-requirements.  It will ask for KeyStore credentials interactively.
+Replace ``type`` with ``release`` or ``debug`` based on your requirements.
+It will ask for KeyStore credentials interactively.
 
 The script above will also generate a universal APK.
 
 .. _bundletool-all.jar: https://github.com/google/bundletool
+
+
+Build documentation
+===================
+See  `docs/raw/en/README.md <docs/raw/en/README.md>`_

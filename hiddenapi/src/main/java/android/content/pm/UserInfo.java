@@ -2,9 +2,14 @@
 
 package android.content.pm;
 
+import android.os.Build;
+import android.os.Parcel;
 import android.os.Parcelable;
+import android.os.UserHandle;
 
-import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
+
+import misc.utils.HiddenUtil;
 
 /**
  * Per-user information.
@@ -58,20 +63,23 @@ public class UserInfo implements Parcelable {
      */
     public static final int FLAG_DISABLED = 0x00000040;
 
+    @RequiresApi(Build.VERSION_CODES.N)
     public static final int FLAG_QUIET_MODE = 0x00000080;
 
     /**
      * Indicates that this user is ephemeral. I.e. the user will be removed after leaving
      * the foreground.
      */
+    @RequiresApi(Build.VERSION_CODES.N)
     public static final int FLAG_EPHEMERAL = 0x00000100;
 
     /**
      * User is for demo purposes only and can be removed at any time.
      */
+    @RequiresApi(Build.VERSION_CODES.N_MR1)
     public static final int FLAG_DEMO = 0x00000200;
 
-    public static final int NO_PROFILE_GROUP_ID = -10000;  // UserHandle.USER_NULL;
+    public static final int NO_PROFILE_GROUP_ID = -1;
 
     public int id;
     public int serialNumber;
@@ -80,6 +88,7 @@ public class UserInfo implements Parcelable {
     public int flags;
     public long creationTime;
     public long lastLoggedInTime;
+    @RequiresApi(Build.VERSION_CODES.N)
     public String lastLoggedInFingerprint;
     /**
      * If this user is a parent user, it would be its own user id.
@@ -87,10 +96,12 @@ public class UserInfo implements Parcelable {
      * Otherwise, it would be {@link #NO_PROFILE_GROUP_ID}.
      */
     public int profileGroupId;
+    @RequiresApi(Build.VERSION_CODES.N)
     public int restrictedProfileParentId;
     /**
      * Which profile badge color/label to use.
      */
+    @RequiresApi(Build.VERSION_CODES.O)
     public int profileBadge;
     /**
      * User is only partially created.
@@ -99,80 +110,79 @@ public class UserInfo implements Parcelable {
     public boolean guestToRemove;
 
     public boolean isPrimary() {
-        return (flags & FLAG_PRIMARY) == FLAG_PRIMARY;
+        return HiddenUtil.throwUOE();
     }
 
     public boolean isAdmin() {
-        return (flags & FLAG_ADMIN) == FLAG_ADMIN;
+        return HiddenUtil.throwUOE();
     }
 
     public boolean isGuest() {
-        return (flags & FLAG_GUEST) == FLAG_GUEST;
+        return HiddenUtil.throwUOE();
     }
 
     public boolean isRestricted() {
-        return (flags & FLAG_RESTRICTED) == FLAG_RESTRICTED;
+        return HiddenUtil.throwUOE();
     }
 
     public boolean isManagedProfile() {
-        return (flags & FLAG_MANAGED_PROFILE) == FLAG_MANAGED_PROFILE;
+        return HiddenUtil.throwUOE();
     }
 
     public boolean isEnabled() {
-        return (flags & FLAG_DISABLED) != FLAG_DISABLED;
+        return HiddenUtil.throwUOE();
     }
 
+    @RequiresApi(Build.VERSION_CODES.N)
     public boolean isQuietModeEnabled() {
-        return (flags & FLAG_QUIET_MODE) == FLAG_QUIET_MODE;
+        return HiddenUtil.throwUOE();
     }
 
+    @RequiresApi(Build.VERSION_CODES.N)
     public boolean isEphemeral() {
-        return (flags & FLAG_EPHEMERAL) == FLAG_EPHEMERAL;
+        return HiddenUtil.throwUOE();
     }
 
+    @RequiresApi(Build.VERSION_CODES.N)
     public boolean isInitialized() {
-        return (flags & FLAG_INITIALIZED) == FLAG_INITIALIZED;
+        return HiddenUtil.throwUOE();
     }
 
+    @RequiresApi(Build.VERSION_CODES.N_MR1)
     public boolean isDemo() {
-        return (flags & FLAG_DEMO) == FLAG_DEMO;
+        return HiddenUtil.throwUOE();
     }
 
     /**
      * @return true if this user can be switched to.
      **/
     public boolean supportsSwitchTo() {
-        if (isEphemeral() && !isEnabled()) {
-            // Don't support switching to an ephemeral user with removal in progress.
-            return false;
-        }
-        return !isManagedProfile();
+        return HiddenUtil.throwUOE();
     }
 
-    public UserInfo(@NonNull UserInfo orig) {
-        name = orig.name;
-        iconPath = orig.iconPath;
-        id = orig.id;
-        flags = orig.flags;
-        serialNumber = orig.serialNumber;
-        creationTime = orig.creationTime;
-        lastLoggedInTime = orig.lastLoggedInTime;
-        lastLoggedInFingerprint = orig.lastLoggedInFingerprint;
-        partial = orig.partial;
-        profileGroupId = orig.profileGroupId;
-        restrictedProfileParentId = orig.restrictedProfileParentId;
-        guestToRemove = orig.guestToRemove;
-        profileBadge = orig.profileBadge;
+    public UserHandle getUserHandle() {
+        return HiddenUtil.throwUOE();
     }
 
-//    @UnsupportedAppUsage
-//    public UserHandle getUserHandle() {
-//        return new UserHandle(id);
-//    }
-
-    @NonNull
     @Override
-    public String toString() {
-        return "UserInfo{" + id + ":" + name + ":" + Integer.toHexString(flags) + "}";
+    public int describeContents() {
+        return HiddenUtil.throwUOE();
     }
+
+    @Override
+    public void writeToParcel(Parcel dest, int flags) {
+        HiddenUtil.throwUOE(dest, flags);
+    }
+
+    public static final Creator<UserInfo> CREATOR = new Creator<UserInfo>() {
+        @Override
+        public UserInfo createFromParcel(Parcel in) {
+            return HiddenUtil.throwUOE(in);
+        }
+
+        @Override
+        public UserInfo[] newArray(int size) {
+            return HiddenUtil.throwUOE(size);
+        }
+    };
 }

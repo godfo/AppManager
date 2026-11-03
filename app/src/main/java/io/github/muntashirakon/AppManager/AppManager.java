@@ -3,83 +3,83 @@
 package io.github.muntashirakon.AppManager;
 
 import android.app.Application;
+
+import io.github.muntashirakon.AppManager.permission.PermissionOverrideManager;
 import android.content.Context;
-import android.content.pm.IPackageManager;
 import android.os.Build;
 import android.sun.security.provider.JavaKeyStoreProvider;
 
-import androidx.annotation.NonNull;
-import androidx.room.Room;
+import androidx.annotation.Keep;
 
 import com.topjohnwu.superuser.Shell;
-import com.yariksoffice.lingver.Lingver;
 
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.lsposed.hiddenapibypass.HiddenApiBypass;
 
 import java.security.Security;
 
-import io.github.muntashirakon.AppManager.db.AMDatabase;
-import io.github.muntashirakon.AppManager.ipc.ProxyBinder;
-import io.github.muntashirakon.AppManager.utils.LangUtils;
+import dalvik.system.ZipPathValidator;
+import io.github.muntashirakon.AppManager.misc.AMExceptionHandler;
+import io.github.muntashirakon.AppManager.compat.ProcessCompat;
+import io.github.muntashirakon.AppManager.utils.Utils;
+import io.github.muntashirakon.AppManager.utils.appearance.AppearanceUtils;
 
 public class AppManager extends Application {
-    private static AppManager instance;
-    private static AMDatabase db;
-    private static boolean isAuthenticated = false;
-
     static {
-        Shell.enableVerboseLogging = BuildConfig.DEBUG;
+        Shell.enableVerboseLogging = false; // BuildConfig.DEBUG;
         Shell.setDefaultBuilder(Shell.Builder.create()
                 .setFlags(Shell.FLAG_MOUNT_MASTER)
                 .setTimeout(10));
-    }
-
-    @NonNull
-    public static AppManager getInstance() {
-        return instance;
-    }
-
-    @NonNull
-    public static Context getContext() {
-        return instance.getBaseContext();
-    }
-
-    public static IPackageManager getIPackageManager() {
-        return IPackageManager.Stub.asInterface(ProxyBinder.getService("package"));
-    }
-
-    @NonNull
-    public static synchronized AMDatabase getDb() {
-        if (db == null) {
-            db = Room.databaseBuilder(getContext(), AMDatabase.class, "am")
-                    .addMigrations(AMDatabase.MIGRATION_1_2, AMDatabase.MIGRATION_2_3, AMDatabase.MIGRATION_3_4,
-                            AMDatabase.MIGRATION_4_5)
-                    .build();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // We don't rely on the system to detect a zip slip attack
+            ZipPathValidator.clearCallback();
         }
-        return db;
     }
 
-    public static boolean isAuthenticated() {
-        return isAuthenticated;
-    }
-
-    public static void setIsAuthenticated(boolean isAuthenticated) {
-        AppManager.isAuthenticated = isAuthenticated;
-    }
-
+    @Keep
     @Override
     public void onCreate() {
-        instance = this;
         super.onCreate();
-        Lingver.init(instance, LangUtils.getLocaleByLanguage(instance));
+        if (isIsolatedProcess()) return;
+        PermissionOverrideManager.reconcileAll();
+        Thread.setDefaultUncaughtExceptionHandler(new AMExceptionHandler(this));
+        AppearanceUtils.init(this);
+        Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME);
         Security.addProvider(new JavaKeyStoreProvider());
+        Security.addProvider(new BouncyCastleProvider());
     }
 
+    @Keep
     @Override
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        if (!isIsolatedProcess() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !Utils.isRoboUnitTest()) {
             HiddenApiBypass.addHiddenApiExemptions("L");
         }
+    }
+
+    private static boolean isIsolatedProcess() {
+        int uid = android.os.Process.myUid();
+        return uid >= ProcessCompat.FIRST_ISOLATED_UID && uid <= ProcessCompat.LAST_ISOLATED_UID;
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= TRIM_MEMORY_RUNNING_CRITICAL) {
+            StaticDataset.cleanup();
+        }
+    }
+
+    @Override
+    public void onLowMemory() {
+        super.onLowMemory();
+        StaticDataset.cleanup();
+    }
+
+    @Override
+    public void onTerminate() {
+        super.onTerminate();
+        StaticDataset.cleanup();
     }
 }

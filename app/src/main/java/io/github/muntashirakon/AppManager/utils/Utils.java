@@ -2,18 +2,26 @@
 
 package io.github.muntashirakon.AppManager.utils;
 
+import static android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
+import static android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
+
+import android.app.Activity;
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ConfigurationInfo;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.content.pm.PermissionInfo;
 import android.content.pm.ServiceInfo;
-import android.content.pm.Signature;
 import android.content.res.Configuration;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Parcel;
+import android.os.UserHandleHidden;
 import android.text.GetChars;
 import android.text.TextUtils;
 import android.util.Pair;
@@ -27,44 +35,27 @@ import androidx.annotation.StringRes;
 import androidx.core.content.pm.PermissionInfoCompat;
 import androidx.fragment.app.FragmentActivity;
 
-import org.w3c.dom.Document;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
+import org.jetbrains.annotations.Contract;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.StringWriter;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.cert.CertificateException;
-import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.transform.OutputKeys;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
-import javax.xml.xpath.XPath;
-import javax.xml.xpath.XPathConstants;
-import javax.xml.xpath.XPathFactory;
-
-import aosp.libcore.util.HexEncoding;
+import aosp.libcore.util.EmptyArray;
 import io.github.muntashirakon.AppManager.BuildConfig;
 import io.github.muntashirakon.AppManager.R;
-import io.github.muntashirakon.AppManager.logs.Log;
+import io.github.muntashirakon.AppManager.apk.signing.SignerInfo;
+import io.github.muntashirakon.AppManager.compat.PackageManagerCompat;
 import io.github.muntashirakon.AppManager.misc.OsEnvironment;
 
 public class Utils {
-    public static final String TERMUX_LOGIN_PATH = OsEnvironment.getDataDataDirectory() + "/com.termux/files/usr/bin/login";
+    public static final String TERMUX_LOGIN_PATH = OsEnvironment.getDataDirectoryRaw() + "/data/com.termux/files/usr/bin/login";
 
     @NonNull
     public static String camelCaseToSpaceSeparatedString(@NonNull String str) {
@@ -83,15 +74,15 @@ public class Utils {
         String[] strings = str.split("\\s");
         StringBuilder builder = new StringBuilder();
         for (String s : strings) {
-            if (s.length() > 0) builder.append(s.charAt(0));
+            if (!s.isEmpty()) builder.append(s.charAt(0));
         }
         return builder.toString().toLowerCase(Locale.ROOT);
     }
 
-    // https://commons.apache.org/proper/commons-lang/javadocs/api-3.1/src-html/org/apache/commons/lang3/StringUtils.html#line.3164
+    // https://github.com/apache/commons-lang/blob/master/src/main/java/org/apache/commons/lang3/StringUtils.java#L7514
     @NonNull
     public static String[] splitByCharacterType(@NonNull String str, boolean camelCase) {
-        if (str.length() == 0) return new String[]{};
+        if (str.isEmpty()) return EmptyArray.STRING;
         char[] c = str.toCharArray();
         List<String> list = new ArrayList<>();
         int tokenStart = 0;
@@ -268,12 +259,12 @@ public class Utils {
             builder.append("Mode changed, ");
         checkStringBuilderEnd(builder);
         String result = builder.toString();
-        return result.equals("") ? "null" : result;
+        return result.isEmpty() ? "null" : result;
     }
 
     // FIXME Add translation support
     @NonNull
-    public static String getServiceFlagsString(int flag) {
+    public static CharSequence getServiceFlagsString(int flag) {
         StringBuilder builder = new StringBuilder();
         if ((flag & ServiceInfo.FLAG_STOP_WITH_TASK) != 0)
             builder.append("Stop with task, ");
@@ -294,7 +285,7 @@ public class Utils {
         }
         checkStringBuilderEnd(builder);
         String result = builder.toString();
-        return result.equals("") ? "\u2690" : "\u2691 " + result;
+        return TextUtils.isEmpty(result) ? "" : ("⚑ " + result);
     }
 
     // FIXME Add translation support
@@ -335,7 +326,7 @@ public class Utils {
             builder.append("NotNeeded, ");
         checkStringBuilderEnd(builder);
         String result = builder.toString();
-        return result.equals("") ? "\u2690" : "\u2691 " + result;
+        return result.isEmpty() ? "⚐" : "⚑ " + result;
     }
 
     // FIXME Add translation support
@@ -404,8 +395,8 @@ public class Utils {
         if ((flag & ConfigurationInfo.INPUT_FEATURE_FIVE_WAY_NAV) != 0)
             string += "Five way nav";
         if ((flag & ConfigurationInfo.INPUT_FEATURE_HARD_KEYBOARD) != 0)
-            string += (string.length() == 0 ? "" : "|") + "Hard keyboard";
-        return string.length() == 0 ? "null" : string;
+            string += (string.isEmpty() ? "" : "|") + "Hard keyboard";
+        return string.isEmpty() ? "null" : string;
     }
 
     @StringRes
@@ -467,19 +458,25 @@ public class Utils {
         return major + "." + minor;
     }
 
-    @NonNull
-    public static String bytesToHex(@NonNull byte[] bytes) {
-        return HexEncoding.encodeToString(bytes, false /* lowercase */);
-    }
-
-    @NonNull
-    public static byte[] longToBytes(long l) {
-        byte[] result = new byte[8];
-        for (int i = 7; i >= 0; i--) {
-            result[i] = (byte) (l & 0xFF);
-            l >>= 8;
+    @Nullable
+    public static String getVulkanVersion(PackageManager pm) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return null;
         }
-        return result;
+        // https://cs.android.com/android/platform/superproject/main/+/main:frameworks/base/core/java/android/os/GraphicsEnvironment.java;l=193;drc=f80e786d308318894be30d54b93f38034496fc66
+        if (pm.hasSystemFeature(PackageManager.FEATURE_VULKAN_HARDWARE_VERSION, 0x00403000)) {
+            return "1.3";
+        }
+        if (pm.hasSystemFeature(PackageManager.FEATURE_VULKAN_HARDWARE_VERSION, 0x00402000)) {
+            return "1.2";
+        }
+        if (pm.hasSystemFeature(PackageManager.FEATURE_VULKAN_HARDWARE_VERSION, 0x00401000)) {
+            return "1.1";
+        }
+        if (pm.hasSystemFeature(PackageManager.FEATURE_VULKAN_HARDWARE_VERSION, 0x00400000)) {
+            return "1.0";
+        }
+        return null;
     }
 
     @CheckResult
@@ -519,108 +516,15 @@ public class Utils {
 
     @NonNull
     public static Pair<String, String> getIssuerAndAlg(@NonNull PackageInfo p) {
-        Signature[] signatures = PackageUtils.getSigningInfo(p, false);
-        X509Certificate c;
-        if (signatures == null) return new Pair<>("", "");
-        String name = "";
-        String algoName = "";
-        for (Signature sg : signatures) {
-            try (InputStream is = new ByteArrayInputStream(sg.toByteArray())) {
-                c = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(is);
-                name = c.getIssuerX500Principal().getName();
-                algoName = c.getSigAlgName();
-                break;
-            } catch (IOException | CertificateException ignore) {
+        SignerInfo signerInfo = PackageUtils.getSignerInfo(p, false);
+        if (signerInfo != null) {
+            X509Certificate[] certs = signerInfo.getCurrentSignerCerts();
+            if (certs != null && certs.length > 0) {
+                X509Certificate c = certs[0];
+                return new Pair<>(c.getIssuerX500Principal().getName(), c.getSigAlgName());
             }
         }
-        return new Pair<>(name, algoName);
-    }
-
-    /**
-     * Format xml file to correct indentation ...
-     */
-    @NonNull
-    public static String getProperXml(@NonNull String dirtyXml) {
-        try {
-            Document document = DocumentBuilderFactory.newInstance()
-                    .newDocumentBuilder()
-                    .parse(new InputSource(new ByteArrayInputStream(dirtyXml.getBytes(StandardCharsets.UTF_8))));
-
-            XPath xPath = XPathFactory.newInstance().newXPath();
-            NodeList nodeList = (NodeList) xPath.evaluate("//text()[normalize-space()='']",
-                    document,
-                    XPathConstants.NODESET);
-
-            for (int i = 0; i < nodeList.getLength(); ++i) {
-                Node node = nodeList.item(i);
-                node.getParentNode().removeChild(node);
-            }
-
-            Transformer transformer = TransformerFactory.newInstance().newTransformer();
-            transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
-            transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "4");
-
-            StringWriter stringWriter = new StringWriter();
-            StreamResult streamResult = new StreamResult(stringWriter);
-
-            transformer.transform(new DOMSource(document), streamResult);
-
-            return stringWriter.toString();
-        } catch (Exception e) {
-            Log.e("Utils", "Could not get proper XML.", e);
-            return dirtyXml;
-        }
-    }
-
-    public static String getFormattedDuration(Context context, long time) {
-        return getFormattedDuration(context, time, false);
-    }
-
-    public static String getFormattedDuration(Context context, long time, boolean addSign) {
-        String fTime = "";
-        if (time < 0) {
-            time = -time;
-            if (addSign) fTime = "- ";
-        }
-        time /= 60000; // minutes
-        long month, day, hour, min;
-        month = time / 43200;
-        time %= 43200;
-        day = time / 1440;
-        time %= 1440;
-        hour = time / 60;
-        min = time % 60;
-        int count = 0;
-        if (month != 0) {
-            fTime += context.getResources().getQuantityString(R.plurals.usage_months, (int) month, month);
-            ++count;
-        }
-        if (day != 0) {
-            fTime += (count > 0 ? " " : "") + context.getResources().getQuantityString(R.plurals.usage_days, (int) day, day);
-            ++count;
-        }
-        if (hour != 0) {
-            fTime += (count > 0 ? " " : "") + context.getResources().getQuantityString(R.plurals.usage_hours, (int) hour, hour);
-            ++count;
-        }
-        if (min != 0) {
-            fTime += (count > 0 ? " " : "") + context.getString(R.string.usage_min, min);
-        } else {
-            if (count == 0) fTime = context.getString(R.string.usage_less_than_a_minute);
-        }
-        return fTime;
-    }
-
-    public static boolean isAppUpdated() {
-        long newVersionCode = BuildConfig.VERSION_CODE;
-        long oldVersionCode = (long) AppPref.get(AppPref.PrefKey.PREF_LAST_VERSION_CODE_LONG);
-        return oldVersionCode != 0 && oldVersionCode < newVersionCode;
-    }
-
-    public static boolean isAppInstalled() { // or data cleared
-        return (long) AppPref.get(AppPref.PrefKey.PREF_LAST_VERSION_CODE_LONG) == 0;
+        return new Pair<>("", "");
     }
 
     /**
@@ -633,7 +537,7 @@ public class Utils {
      */
     // Similar impl. of https://commons.apache.org/proper/commons-lang/apidocs/src-html/org/apache/commons/lang3/StringUtils.html#line.6418
     @NonNull
-    public static String replaceOnce(@NonNull final String text, @NonNull String searchString, @NonNull final String replacement) {
+    public static String replaceOnce(@NonNull String text, @NonNull CharSequence searchString, @NonNull CharSequence replacement) {
         if (TextUtils.isEmpty(text) || TextUtils.isEmpty(searchString)) {
             return text;
         }
@@ -651,9 +555,10 @@ public class Utils {
         return buf.toString();
     }
 
-    public static int getIntegerFromString(CharSequence needle,
-                                           List<CharSequence> stringsToMatch,
-                                           List<Integer> associatedIntegers)
+    @Contract("null,_,_ -> fail")
+    public static int getIntegerFromString(@Nullable CharSequence needle,
+                                           @NonNull List<CharSequence> stringsToMatch,
+                                           @NonNull List<Integer> associatedIntegers)
             throws IllegalArgumentException {
         if (needle == null) throw new IllegalArgumentException("Needle cannot be null");
         if (stringsToMatch.size() != associatedIntegers.size()) {
@@ -669,16 +574,35 @@ public class Utils {
         }
     }
 
-    public static void writeBoolean(boolean b, @NonNull Parcel dest) {
-        dest.writeInt(b ? 1 : 0);
+    public static boolean isTv(@NonNull Context context) {
+        return context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK);
     }
 
-    public static boolean readBoolean(@NonNull Parcel in) {
-        return in.readInt() != 0;
+    public static boolean isVrHeadset(@NonNull Context context) {
+        int uiModeType = context.getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_TYPE_MASK;
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && uiModeType == Configuration.UI_MODE_TYPE_VR_HEADSET;
+    }
+
+    public static boolean canDisplayNotification(@NonNull Context context) {
+        // Notifications can be displayed in all supported devices except Android TV (O+)
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !isTv(context);
+    }
+
+    public static boolean isAppInForeground() {
+        ActivityManager.RunningAppProcessInfo appProcessInfo = new ActivityManager.RunningAppProcessInfo();
+        ActivityManager.getMyMemoryState(appProcessInfo);
+        return (appProcessInfo.importance == IMPORTANCE_FOREGROUND || appProcessInfo.importance == IMPORTANCE_VISIBLE);
     }
 
     public static int getTotalCores() {
         return Runtime.getRuntime().availableProcessors();
+    }
+
+    public static void copyToClipboard(@NonNull Context context, @Nullable CharSequence label, @NonNull CharSequence text) {
+        ClipboardUtils.copyToClipboard(context, label, text.toString());
+        UIUtils.displayShortToast(R.string.copied_to_clipboard);
     }
 
     @Nullable
@@ -694,9 +618,73 @@ public class Utils {
     }
 
     public static void relaunchApp(@NonNull FragmentActivity activity) {
-        Intent intent = activity.getPackageManager().getLaunchIntentForPackage(activity.getPackageName());
+        Intent intent = PackageManagerCompat.getLaunchIntentForPackage(activity.getPackageName(), UserHandleHidden.myUserId());
+        if (intent == null) {
+            // No launch intent
+            return;
+        }
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         activity.startActivity(intent);
         activity.finish();
+    }
+
+    @Nullable
+    public static String getRealReferrer(@NonNull Activity activity) {
+        String callingPackage = activity.getCallingPackage();
+        if (callingPackage != null && !BuildConfig.APPLICATION_ID.equals(callingPackage)) {
+            return callingPackage;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            Intent intent = activity.getIntent();
+            intent.removeExtra(Intent.EXTRA_REFERRER_NAME);
+            intent.removeExtra(Intent.EXTRA_REFERRER);
+            // Now that the custom referrers are removed, it should return the real referrer.
+            // android-app:authority
+            Uri referrer = activity.getReferrer();
+            return referrer != null ? referrer.getAuthority() : null;
+        }
+        return null;
+    }
+
+    public static boolean isWifiActive(@NonNull Context context) {
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            NetworkCapabilities capabilities = cm.getNetworkCapabilities(cm.getActiveNetwork());
+            return capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+        }
+        NetworkInfo info = cm.getActiveNetworkInfo();
+        return info != null && info.getType() == ConnectivityManager.TYPE_WIFI;
+    }
+
+    @NonNull
+    public static <T> String prettyPrintObject(@Nullable T obj) {
+        if (obj == null) {
+            return "null";
+        }
+        StringBuilder sb = new StringBuilder();
+        Class<?> clazz = obj.getClass();
+        sb.append(clazz.getSimpleName()).append("{");
+        Field[] fields = clazz.getDeclaredFields();
+        for (int i = 0; i < fields.length; i++) {
+            Field field = fields[i];
+            field.setAccessible(true);
+            sb.append(field.getName()).append("=");
+            try {
+                Object value = field.get(obj);
+                sb.append(value);
+            } catch (IllegalAccessException e) {
+                sb.append("N/A");
+            }
+            if (i < fields.length - 1) {
+                sb.append(", ");
+            }
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+
+    public static boolean isRoboUnitTest() {
+        return "robolectric".equals(Build.FINGERPRINT);
     }
 }

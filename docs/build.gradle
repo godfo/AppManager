@@ -1,19 +1,19 @@
+import javax.inject.Inject
+
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-apply plugin: 'com.android.library'
+plugins {
+    id('com.android.library')
+}
 
 android {
-    compileSdkVersion rootProject.ext.compileSdk
-    buildToolsVersion rootProject.ext.buildTools
+    namespace 'io.github.muntashirakon.AppManager.docs'
+    compileSdk compile_sdk
+    buildToolsVersion = build_tools
 
     defaultConfig {
-        minSdkVersion rootProject.ext.minSdk
-        targetSdkVersion rootProject.ext.targetSdk
-    }
-
-    buildTypes {
-        preRelease {
-        }
+        minSdk min_sdk
+        targetSdk target_sdk
     }
 
     compileOptions {
@@ -21,11 +21,18 @@ android {
     }
 }
 
-task buildDocs {
+// https://docs.gradle.org/current/userguide/service_injection.html#execoperations
+interface InjectedExecOps {
+    @Inject
+    ExecOperations getExecOps()
+}
+
+tasks.register('buildDocs') {
+    def injected = project.objects.newInstance(InjectedExecOps)
     doLast {
         println("=== docs: start ===")
-        def buildExec = "${rootProject.projectDir.absolutePath}/scripts/make_docs.sh"
-        exec {
+        String buildExec = "${rootProject.projectDir.absolutePath}/scripts/make_docs.sh"
+        injected.execOps.exec {
             workingDir = project.rootDir
             executable = buildExec
         }
@@ -33,7 +40,7 @@ task buildDocs {
     }
 }
 
-task cleanupDocs {
+tasks.register('cleanupDocs') {
     doLast {
         File file = new File("${rootProject.projectDir.absolutePath}/docs/src/main/res")
         if (file.exists()) {

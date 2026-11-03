@@ -2,46 +2,37 @@
 
 package io.github.muntashirakon.AppManager.runner;
 
+import android.text.TextUtils;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.annotation.StringDef;
 import androidx.annotation.WorkerThread;
-import com.android.internal.util.TextUtils;
-import io.github.muntashirakon.AppManager.logs.Log;
-import io.github.muntashirakon.AppManager.utils.AppPref;
 
 import java.io.InputStream;
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import io.github.muntashirakon.AppManager.ipc.LocalServices;
+import io.github.muntashirakon.AppManager.logs.Log;
+import io.github.muntashirakon.AppManager.settings.Ops;
+
 public abstract class Runner {
-    public static final String TAG = "Runner";
-
-    @StringDef({MODE_AUTO, MODE_ROOT, MODE_ADB_OVER_TCP, MODE_ADB_WIFI, MODE_NO_ROOT})
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface Mode {
-    }
-
-    public static final String MODE_AUTO = "auto";
-    public static final String MODE_ROOT = "root";
-    public static final String MODE_ADB_OVER_TCP = "adb_tcp";
-    public static final String MODE_ADB_WIFI = "adb_wifi";
-    public static final String MODE_NO_ROOT = "no-root";
+    public static final String TAG = Runner.class.getSimpleName();
 
     public static class Result {
-        private final List<String> stdout;
-        private final List<String> stderr;
-        private final int exitCode;
+        private final List<String> mStdout;
+        private final List<String> mStderr;
+        private final int mExitCode;
 
-        public Result(@NonNull List<String> stdout, @NonNull List<String> stderr, int exitCode) {
-            this.stdout = stdout;
-            this.stderr = stderr;
-            this.exitCode = exitCode;
+        Result(@NonNull List<String> stdout, @NonNull List<String> stderr, int exitCode) {
+            mStdout = stdout;
+            mStderr = stderr;
+            mExitCode = exitCode;
             // Print stderr
-            if (stderr.size() > 0) Log.e("Runner", android.text.TextUtils.join("\n", stderr));
+            if (stderr.size() > 0) {
+                Log.e(TAG, TextUtils.join("\n", stderr));
+            }
         }
 
         public Result(int exitCode) {
@@ -53,75 +44,75 @@ public abstract class Runner {
         }
 
         public boolean isSuccessful() {
-            return exitCode == 0;
+            return mExitCode == 0;
         }
 
         public int getExitCode() {
-            return exitCode;
+            return mExitCode;
         }
 
         @NonNull
         public List<String> getOutputAsList() {
-            return stdout;
+            return mStdout;
         }
 
         @NonNull
         public List<String> getOutputAsList(int firstIndex) {
-            if (firstIndex >= stdout.size()) {
+            if (firstIndex >= mStdout.size()) {
                 return Collections.emptyList();
             }
-            return stdout.subList(firstIndex, stdout.size());
+            return mStdout.subList(firstIndex, mStdout.size());
         }
 
         @NonNull
         public String getOutput() {
-            return TextUtils.join("\n", stdout);
+            return TextUtils.join("\n", mStdout);
         }
 
         public List<String> getStderr() {
-            return stderr;
+            return mStderr;
         }
     }
 
-    private static RootShellRunner rootShellRunner;
-    private static AdbShellRunner adbShellRunner;
-    private static UserShellRunner userShellRunner;
+    private static NormalShell sRootShell;
+    private static PrivilegedShell sPrivilegedShell;
+    private static NormalShell sNoRootShell;
 
     @NonNull
-    public static Runner getInstance() {
-        if (AppPref.isRootEnabled()) {
+    private static Runner getInstance() {
+        if (Ops.isDirectRoot()) {
             return getRootInstance();
-        } else if (AppPref.isAdbEnabled()) {
-            return getAdbInstance();
+        } else if (LocalServices.alive()) {
+            return getPrivilegedInstance();
         } else {
-            return getUserInstance();
+            return getNoRootInstance();
         }
     }
 
     @NonNull
-    public static Runner getRootInstance() {
-        if (rootShellRunner == null) {
-            rootShellRunner = new RootShellRunner();
-            Log.d(TAG, "RootShellRunner");
+    static Runner getRootInstance() {
+        if (sRootShell == null) {
+            sRootShell = new NormalShell(true);
+            Log.d(TAG, "RootShell");
         }
-        return rootShellRunner;
+        return sRootShell;
     }
 
     @NonNull
-    public static Runner getAdbInstance() {
-        if (adbShellRunner == null) {
-            adbShellRunner = new AdbShellRunner();
-            Log.d(TAG, "AdbShellRunner");
+    private static Runner getPrivilegedInstance() {
+        if (sPrivilegedShell == null) {
+            sPrivilegedShell = new PrivilegedShell();
+            Log.d(TAG, "PrivilegedShell");
         }
-        return adbShellRunner;
+        return sPrivilegedShell;
     }
 
-    public static Runner getUserInstance() {
-        if (userShellRunner == null) {
-            userShellRunner = new UserShellRunner();
-            Log.d(TAG, "UserShellRunner");
+    private static Runner getNoRootInstance() {
+        if (sNoRootShell == null) {
+            sNoRootShell = new NormalShell(false);
+            Log.d(TAG, "NoRootShell");
         }
-        return userShellRunner;
+        return sNoRootShell;
     }
 
     @NonNull
@@ -145,26 +136,14 @@ public abstract class Runner {
     }
 
     @NonNull
-    synchronized public static Result runCommand(@NonNull Runner runner, @NonNull String command) {
-        return runner.run(command, null);
-    }
-
-    @NonNull
-    synchronized public static Result runCommand(@NonNull Runner runner, @NonNull String[] command) {
-        StringBuilder cmd = new StringBuilder();
-        for (String part : command) {
-            cmd.append(RunnerUtils.escape(part)).append(" ");
-        }
-        return runCommand(runner, cmd.toString(), null);
-    }
-
-    @NonNull
-    synchronized public static Result runCommand(@NonNull Runner runner, @NonNull String command, @Nullable InputStream inputStream) {
+    synchronized private static Result runCommand(@NonNull Runner runner, @NonNull String command,
+                                                  @Nullable InputStream inputStream) {
         return runner.run(command, inputStream);
     }
 
     @NonNull
-    synchronized public static Result runCommand(@NonNull Runner runner, @NonNull String[] command, @Nullable InputStream inputStream) {
+    synchronized private static Result runCommand(@NonNull Runner runner, @NonNull String[] command,
+                                                  @Nullable InputStream inputStream) {
         StringBuilder cmd = new StringBuilder();
         for (String part : command) {
             cmd.append(RunnerUtils.escape(part)).append(" ");
@@ -193,15 +172,23 @@ public abstract class Runner {
         inputStreams.clear();
     }
 
+    public abstract boolean isRoot();
+
     @WorkerThread
     @NonNull
-    public abstract Result runCommand();
+    protected abstract Result runCommand();
 
     @NonNull
     private Result run(@NonNull String command, @Nullable InputStream inputStream) {
-        clear();
-        addCommand(command);
-        if (inputStream != null) add(inputStream);
-        return runCommand();
+        try {
+            clear();
+            addCommand(command);
+            if (inputStream != null) {
+                add(inputStream);
+            }
+            return runCommand();
+        } finally {
+            clear();
+        }
     }
 }

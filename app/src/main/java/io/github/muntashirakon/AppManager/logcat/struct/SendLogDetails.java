@@ -2,60 +2,44 @@
 
 package io.github.muntashirakon.AppManager.logcat.struct;
 
+import androidx.annotation.Nullable;
+
 import io.github.muntashirakon.io.Path;
 
 // Copyright 2012 Nolan Lawson
+// Copyright 2021 Muntashir Al-Islam
 public class SendLogDetails {
-    private String subject;
-    private String body;
-    private Path attachment;
-    private SendLogDetails.AttachmentType attachmentType;
+    @Nullable
+    private String mSubject;
+    @Nullable
+    private Path mAttachment;
+    @Nullable
+    private String mAttachmentType;
 
+    @Nullable
     public String getSubject() {
-        return subject;
+        return mSubject;
     }
 
-    public void setSubject(String subject) {
-        this.subject = subject;
+    public void setSubject(@Nullable String subject) {
+        mSubject = subject;
     }
 
-    public String getBody() {
-        return body;
-    }
-
-    public void setBody(String body) {
-        this.body = body;
-    }
-
+    @Nullable
     public Path getAttachment() {
-        return attachment;
+        return mAttachment;
     }
 
-    public void setAttachment(Path attachment) {
-        this.attachment = attachment;
+    public void setAttachment(@Nullable Path attachment) {
+        mAttachment = attachment;
     }
 
-    public SendLogDetails.AttachmentType getAttachmentType() {
-        return attachmentType;
+    @Nullable
+    public String getAttachmentType() {
+        return mAttachmentType;
     }
 
-    public void setAttachmentType(SendLogDetails.AttachmentType attachmentType) {
-        this.attachmentType = attachmentType;
-    }
-
-    public enum AttachmentType {
-        None("text/plain"),
-        Zip("application/zip"),
-        Text("application/*");
-
-        private final String mimeType;
-
-        AttachmentType(String mimeType) {
-            this.mimeType = mimeType;
-        }
-
-        public String getMimeType() {
-            return this.mimeType;
-        }
+    public void setAttachmentType(@Nullable String attachmentType) {
+        mAttachmentType = attachmentType;
     }
 }

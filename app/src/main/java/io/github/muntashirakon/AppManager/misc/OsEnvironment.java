@@ -3,24 +3,26 @@
 package io.github.muntashirakon.AppManager.misc;
 
 import android.annotation.UserIdInt;
-import android.os.storage.StorageManager;
+import android.os.UserHandleHidden;
+import android.os.storage.StorageManagerHidden;
 import android.os.storage.StorageVolume;
+import android.os.storage.StorageVolumeHidden;
 import android.text.TextUtils;
 import android.util.SparseArray;
 
 import androidx.annotation.NonNull;
 
 import java.io.File;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
+import dev.rikka.tools.refine.Refine;
+import io.github.muntashirakon.AppManager.compat.StorageManagerCompat;
 import io.github.muntashirakon.AppManager.logs.Log;
-import io.github.muntashirakon.AppManager.users.Users;
-import io.github.muntashirakon.io.ProxyFile;
+import io.github.muntashirakon.AppManager.utils.ContextUtils;
+import io.github.muntashirakon.io.Path;
+import io.github.muntashirakon.io.Paths;
 
 // Keep this in sync with https://cs.android.com/android/platform/superproject/+/master:frameworks/base/core/java/android/os/Environment.java
 // Last snapshot https://cs.android.com/android/_/android/platform/frameworks/base/+/bc3d8b9071d4f0b2903d6836770d974e70366290
@@ -49,17 +51,17 @@ public final class OsEnvironment {
     private static final String DIR_FILES = "files";
     private static final String DIR_CACHE = "cache";
 
-    private static final ProxyFile DIR_ANDROID_ROOT = getDirectory(ENV_ANDROID_ROOT, "/system");
-    private static final ProxyFile DIR_ANDROID_DATA = getDirectory(ENV_ANDROID_DATA, "/data");
-    private static final ProxyFile DIR_ANDROID_EXPAND = getDirectory(ENV_ANDROID_EXPAND, "/mnt/expand");
-    private static final ProxyFile DIR_ANDROID_STORAGE = getDirectory(ENV_ANDROID_STORAGE, "/storage");
-    private static final ProxyFile DIR_DOWNLOAD_CACHE = getDirectory(ENV_DOWNLOAD_CACHE, "/cache");
-    private static final ProxyFile DIR_OEM_ROOT = getDirectory(ENV_OEM_ROOT, "/oem");
-    private static final ProxyFile DIR_ODM_ROOT = getDirectory(ENV_ODM_ROOT, "/odm");
-    private static final ProxyFile DIR_VENDOR_ROOT = getDirectory(ENV_VENDOR_ROOT, "/vendor");
-    private static final ProxyFile DIR_PRODUCT_ROOT = getDirectory(ENV_PRODUCT_ROOT, "/product");
-    private static final ProxyFile DIR_SYSTEM_EXT_ROOT = getDirectory(ENV_SYSTEM_EXT_ROOT, "/system_ext");
-    private static final ProxyFile DIR_APEX_ROOT = getDirectory(ENV_APEX_ROOT, "/apex");
+    private static final String DIR_ANDROID_ROOT = getDirectory(ENV_ANDROID_ROOT, "/system");
+    private static final String DIR_ANDROID_DATA = getDirectory(ENV_ANDROID_DATA, "/data");
+    private static final String DIR_ANDROID_EXPAND = getDirectory(ENV_ANDROID_EXPAND, "/mnt/expand");
+    private static final String DIR_ANDROID_STORAGE = getDirectory(ENV_ANDROID_STORAGE, "/storage");
+    private static final String DIR_DOWNLOAD_CACHE = getDirectory(ENV_DOWNLOAD_CACHE, "/cache");
+    private static final String DIR_OEM_ROOT = getDirectory(ENV_OEM_ROOT, "/oem");
+    private static final String DIR_ODM_ROOT = getDirectory(ENV_ODM_ROOT, "/odm");
+    private static final String DIR_VENDOR_ROOT = getDirectory(ENV_VENDOR_ROOT, "/vendor");
+    private static final String DIR_PRODUCT_ROOT = getDirectory(ENV_PRODUCT_ROOT, "/product");
+    private static final String DIR_SYSTEM_EXT_ROOT = getDirectory(ENV_SYSTEM_EXT_ROOT, "/system_ext");
+    private static final String DIR_APEX_ROOT = getDirectory(ENV_APEX_ROOT, "/apex");
 
     private static final UserEnvironment sCurrentUser;
     private static boolean sUserRequired;
@@ -67,7 +69,7 @@ public final class OsEnvironment {
     private static final SparseArray<UserEnvironment> sUserEnvironmentCache = new SparseArray<>(2);
 
     static {
-        sCurrentUser = new UserEnvironment(Users.myUserId());
+        sCurrentUser = new UserEnvironment(UserHandleHidden.myUserId());
         sUserEnvironmentCache.put(sCurrentUser.mUserHandle, sCurrentUser);
     }
 
@@ -89,34 +91,24 @@ public final class OsEnvironment {
         }
 
         @NonNull
-        public ProxyFile[] getExternalDirs() {
+        public Path[] getExternalDirs() {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
-                // The reflection calls cannot be hidden since they are called internally by the
-                // system. The alternative is to parse the Context.getExternalCacheDirs(). Some
-                // results could be null even though StorageVolume is not null.
-                try {
-                    @SuppressWarnings("JavaReflectionMemberAccess")
-                    Method getVolumeList = StorageManager.class.getMethod("getVolumeList", int.class, int.class);
-                    final @NonNull StorageVolume[] volumes = (StorageVolume[]) Objects.requireNonNull(getVolumeList.invoke(null, mUserHandle, 1 << 8 /* FLAG_FOR_WRITE */));
-                    Log.e(TAG, Arrays.toString(volumes));
-                    final List<ProxyFile> files = new ArrayList<>();
-                    File tmpFile;
-                    for (StorageVolume volume : volumes) {
-                        @SuppressWarnings("JavaReflectionMemberAccess")
-                        Method getPathFile = StorageVolume.class.getMethod("getPathFile");
-                        tmpFile = (File) getPathFile.invoke(volume);
-                        if (tmpFile != null) {
-                            files.add(new ProxyFile(tmpFile.getAbsolutePath()));
-                        }
+                final StorageVolume[] volumes = StorageManagerCompat.getVolumeList(ContextUtils.getContext(),
+                        mUserHandle, StorageManagerHidden.FLAG_FOR_WRITE);
+                final List<Path> files = new ArrayList<>();
+                File tmpFile;
+                for (@NonNull StorageVolume volume : volumes) {
+                    StorageVolumeHidden vol = Refine.unsafeCast(volume);
+                    tmpFile = vol.getPathFile();
+                    if (tmpFile != null) {
+                        files.add(Paths.get(tmpFile.getAbsolutePath()));
                     }
-                    return files.toArray(new ProxyFile[0]);
-                } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-                    e.printStackTrace();
                 }
+                return files.toArray(new Path[0]);
             }
             String rawExternalStorage = System.getenv(ENV_EXTERNAL_STORAGE);
             String rawEmulatedTarget = System.getenv("EMULATED_STORAGE_TARGET");
-            List<ProxyFile> externalForApp = new ArrayList<>();
+            List<Path> externalForApp = new ArrayList<>();
             if (!TextUtils.isEmpty(rawEmulatedTarget)) {
                 // Device has emulated storage; external storage paths should have
                 // userId burned into them.
@@ -125,7 +117,7 @@ public final class OsEnvironment {
                 final File emulatedTargetBase = new File(rawEmulatedTarget);
 
                 // /storage/emulated/0
-                externalForApp.add(buildPath(emulatedTargetBase, rawUserId));
+                externalForApp.add(Paths.build(emulatedTargetBase, rawUserId));
             } else {
                 // Device has physical external storage; use plain paths.
                 if (TextUtils.isEmpty(rawExternalStorage)) {
@@ -133,52 +125,51 @@ public final class OsEnvironment {
                     rawExternalStorage = "/storage/sdcard0";
                 }
                 // /storage/sdcard0
-                //noinspection ConstantConditions
-                externalForApp.add(new ProxyFile(rawExternalStorage));
+                externalForApp.add(Paths.get(rawExternalStorage));
             }
-            return externalForApp.toArray(new ProxyFile[0]);
+            return externalForApp.toArray(new Path[0]);
         }
 
         @Deprecated
-        public ProxyFile getExternalStorageDirectory() {
+        public Path getExternalStorageDirectory() {
             return getExternalDirs()[0];
         }
 
         @Deprecated
-        public ProxyFile getExternalStoragePublicDirectory(String type) {
+        public Path getExternalStoragePublicDirectory(String type) {
             return buildExternalStoragePublicDirs(type)[0];
         }
 
-        public ProxyFile[] buildExternalStoragePublicDirs(String type) {
-            return buildPaths(getExternalDirs(), type);
+        public Path[] buildExternalStoragePublicDirs(String type) {
+            return Paths.build(getExternalDirs(), type);
         }
 
-        public ProxyFile[] buildExternalStorageAndroidDataDirs() {
-            return buildPaths(getExternalDirs(), DIR_ANDROID, DIR_DATA);
+        public Path[] buildExternalStorageAndroidDataDirs() {
+            return Paths.build(getExternalDirs(), DIR_ANDROID, DIR_DATA);
         }
 
-        public ProxyFile[] buildExternalStorageAndroidObbDirs() {
-            return buildPaths(getExternalDirs(), DIR_ANDROID, DIR_OBB);
+        public Path[] buildExternalStorageAndroidObbDirs() {
+            return Paths.build(getExternalDirs(), DIR_ANDROID, DIR_OBB);
         }
 
-        public ProxyFile[] buildExternalStorageAppDataDirs(String packageName) {
-            return buildPaths(getExternalDirs(), DIR_ANDROID, DIR_DATA, packageName);
+        public Path[] buildExternalStorageAppDataDirs(String packageName) {
+            return Paths.build(getExternalDirs(), DIR_ANDROID, DIR_DATA, packageName);
         }
 
-        public ProxyFile[] buildExternalStorageAppMediaDirs(String packageName) {
-            return buildPaths(getExternalDirs(), DIR_ANDROID, DIR_MEDIA, packageName);
+        public Path[] buildExternalStorageAppMediaDirs(String packageName) {
+            return Paths.build(getExternalDirs(), DIR_ANDROID, DIR_MEDIA, packageName);
         }
 
-        public ProxyFile[] buildExternalStorageAppObbDirs(String packageName) {
-            return buildPaths(getExternalDirs(), DIR_ANDROID, DIR_OBB, packageName);
+        public Path[] buildExternalStorageAppObbDirs(String packageName) {
+            return Paths.build(getExternalDirs(), DIR_ANDROID, DIR_OBB, packageName);
         }
 
-        public ProxyFile[] buildExternalStorageAppFilesDirs(String packageName) {
-            return buildPaths(getExternalDirs(), DIR_ANDROID, DIR_DATA, packageName, DIR_FILES);
+        public Path[] buildExternalStorageAppFilesDirs(String packageName) {
+            return Paths.build(getExternalDirs(), DIR_ANDROID, DIR_DATA, packageName, DIR_FILES);
         }
 
-        public ProxyFile[] buildExternalStorageAppCacheDirs(String packageName) {
-            return buildPaths(getExternalDirs(), DIR_ANDROID, DIR_DATA, packageName, DIR_CACHE);
+        public Path[] buildExternalStorageAppCacheDirs(String packageName) {
+            return Paths.build(getExternalDirs(), DIR_ANDROID, DIR_DATA, packageName, DIR_CACHE);
         }
     }
 
@@ -187,8 +178,8 @@ public final class OsEnvironment {
      * Always present and mounted read-only.
      */
     @NonNull
-    public static ProxyFile getRootDirectory() {
-        return DIR_ANDROID_ROOT;
+    public static Path getRootDirectory() {
+        return Paths.get(DIR_ANDROID_ROOT);
     }
 
     /**
@@ -196,8 +187,8 @@ public final class OsEnvironment {
      * if any. If present, the partition is mounted read-only.
      */
     @NonNull
-    public static ProxyFile getOemDirectory() {
-        return DIR_OEM_ROOT;
+    public static Path getOemDirectory() {
+        return Paths.get(DIR_OEM_ROOT);
     }
 
     /**
@@ -205,15 +196,21 @@ public final class OsEnvironment {
      * if any. If present, the partition is mounted read-only.
      */
     @NonNull
-    public static ProxyFile getOdmDirectory() {
-        return DIR_ODM_ROOT;
+    public static Path getOdmDirectory() {
+        return Paths.get(DIR_ODM_ROOT);
     }
 
     /**
      * Return root directory of the "vendor" partition that holds vendor-provided
      * software that should persist across simple reflashing of the "system" partition.
      */
-    public static @NonNull ProxyFile getVendorDirectory() {
+    @NonNull
+    public static Path getVendorDirectory() {
+        return Paths.get(DIR_VENDOR_ROOT);
+    }
+
+    @NonNull
+    public static String getVendorDirectoryRaw() {
         return DIR_VENDOR_ROOT;
     }
 
@@ -221,7 +218,13 @@ public final class OsEnvironment {
      * Return root directory of the "product" partition holding product-specific
      * customizations if any. If present, the partition is mounted read-only.
      */
-    public static @NonNull ProxyFile getProductDirectory() {
+    @NonNull
+    public static Path getProductDirectory() {
+        return Paths.get(DIR_PRODUCT_ROOT);
+    }
+
+    @NonNull
+    public static String getProductDirectoryRaw() {
         return DIR_PRODUCT_ROOT;
     }
 
@@ -229,40 +232,48 @@ public final class OsEnvironment {
      * Return root directory of the "system_ext" partition holding system partition's extension
      * If present, the partition is mounted read-only.
      */
-    public static @NonNull ProxyFile getSystemExtDirectory() {
-        return DIR_SYSTEM_EXT_ROOT;
+    @NonNull
+    public static Path getSystemExtDirectory() {
+        return Paths.get(DIR_SYSTEM_EXT_ROOT);
     }
 
     /**
      * Return the user data directory.
      */
-    public static ProxyFile getDataDirectory() {
+    @NonNull
+    public static Path getDataDirectory() {
+        return Paths.get(DIR_ANDROID_DATA);
+    }
+
+    @NonNull
+    public static String getDataDirectoryRaw() {
         return DIR_ANDROID_DATA;
     }
 
-    public static ProxyFile getDataSystemDirectory() {
-        return new ProxyFile(getDataDirectory(), "system");
+    @NonNull
+    public static Path getDataSystemDirectory() {
+        return Objects.requireNonNull(Paths.build(getDataDirectory(), "system"));
     }
 
     @NonNull
-    public static ProxyFile getDataAppDirectory() {
-        return new ProxyFile(getDataDirectory(), "app");
+    public static Path getDataAppDirectory() {
+        return Objects.requireNonNull(Paths.build(getDataDirectory(), "app"));
     }
 
     @NonNull
-    public static ProxyFile getDataDataDirectory() {
-        return new ProxyFile(getDataDirectory(), "data");
+    public static Path getDataDataDirectory() {
+        return Objects.requireNonNull(Paths.build(getDataDirectory(), "data"));
     }
 
     @NonNull
-    public static ProxyFile getUserSystemDirectory(int userId) {
-        return new ProxyFile(new ProxyFile(getDataSystemDirectory(), "users"), Integer.toString(userId));
+    public static Path getUserSystemDirectory(int userId) {
+        return Objects.requireNonNull(Paths.build(getDataSystemDirectory(), "users", Integer.toString(userId)));
     }
 
     /**
      * Returns the path for android-specific data on the SD card.
      */
-    public static ProxyFile[] buildExternalStorageAndroidDataDirs() {
+    public static Path[] buildExternalStorageAndroidDataDirs() {
         throwIfUserRequired();
         return sCurrentUser.buildExternalStorageAndroidDataDirs();
     }
@@ -270,7 +281,7 @@ public final class OsEnvironment {
     /**
      * Generates the raw path to an application's data
      */
-    public static ProxyFile[] buildExternalStorageAppDataDirs(String packageName) {
+    public static Path[] buildExternalStorageAppDataDirs(String packageName) {
         throwIfUserRequired();
         return sCurrentUser.buildExternalStorageAppDataDirs(packageName);
     }
@@ -278,7 +289,7 @@ public final class OsEnvironment {
     /**
      * Generates the raw path to an application's media
      */
-    public static ProxyFile[] buildExternalStorageAppMediaDirs(String packageName) {
+    public static Path[] buildExternalStorageAppMediaDirs(String packageName) {
         throwIfUserRequired();
         return sCurrentUser.buildExternalStorageAppMediaDirs(packageName);
     }
@@ -286,7 +297,7 @@ public final class OsEnvironment {
     /**
      * Generates the raw path to an application's OBB files
      */
-    public static ProxyFile[] buildExternalStorageAppObbDirs(String packageName) {
+    public static Path[] buildExternalStorageAppObbDirs(String packageName) {
         throwIfUserRequired();
         return sCurrentUser.buildExternalStorageAppObbDirs(packageName);
     }
@@ -294,7 +305,7 @@ public final class OsEnvironment {
     /**
      * Generates the path to an application's files.
      */
-    public static ProxyFile[] buildExternalStorageAppFilesDirs(String packageName) {
+    public static Path[] buildExternalStorageAppFilesDirs(String packageName) {
         throwIfUserRequired();
         return sCurrentUser.buildExternalStorageAppFilesDirs(packageName);
     }
@@ -302,25 +313,25 @@ public final class OsEnvironment {
     /**
      * Generates the path to an application's cache.
      */
-    public static ProxyFile[] buildExternalStorageAppCacheDirs(String packageName) {
+    public static Path[] buildExternalStorageAppCacheDirs(String packageName) {
         throwIfUserRequired();
         return sCurrentUser.buildExternalStorageAppCacheDirs(packageName);
     }
 
-    public static ProxyFile[] buildExternalStoragePublicDirs(@NonNull String dirType) {
+    public static Path[] buildExternalStoragePublicDirs(@NonNull String dirType) {
         throwIfUserRequired();
         return sCurrentUser.buildExternalStoragePublicDirs(dirType);
     }
 
-    public static ProxyFile[] buildExternalStoragePublicDirs() {
+    public static Path[] buildExternalStoragePublicDirs() {
         throwIfUserRequired();
         return sCurrentUser.getExternalDirs();
     }
 
     @NonNull
-    static ProxyFile getDirectory(String variableName, String defaultPath) {
+    static String getDirectory(String variableName, String defaultPath) {
         String path = System.getenv(variableName);
-        return path == null ? new ProxyFile(defaultPath) : new ProxyFile(path);
+        return path == null ? defaultPath : path;
     }
 
     public static void setUserRequired(boolean userRequired) {
@@ -331,32 +342,5 @@ public final class OsEnvironment {
         if (sUserRequired) {
             Log.e(TAG, "Path requests must specify a user by using UserEnvironment", new Throwable());
         }
-    }
-
-    /**
-     * Append path segments to each given base path, returning result.
-     */
-    @NonNull
-    public static ProxyFile[] buildPaths(@NonNull File[] base, String... segments) {
-        ProxyFile[] result = new ProxyFile[base.length];
-        for (int i = 0; i < base.length; i++) {
-            result[i] = buildPath(base[i], segments);
-        }
-        return result;
-    }
-
-    /**
-     * Append path segments to given base path, returning result.
-     */
-    public static ProxyFile buildPath(@NonNull File base, @NonNull String... segments) {
-        ProxyFile cur = new ProxyFile(base.getAbsolutePath());
-        for (String segment : segments) {
-            if (cur == null) {
-                cur = new ProxyFile(segment);
-            } else {
-                cur = new ProxyFile(cur, segment);
-            }
-        }
-        return cur;
     }
 }

@@ -6,34 +6,41 @@ import android.os.Parcel;
 import android.os.Parcelable;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 // Copyright 2017 Zheng Li
 public class CallerResult implements Parcelable {
-    private byte[] reply;
-    private Throwable throwable;
-    private Object replyObj;
+    @Nullable
+    private byte[] mReply;
+    @Nullable
+    private Throwable mThrowable;
+    @Nullable
+    private Object mReplyObj;
 
+    @Nullable
     public byte[] getReply() {
-        return reply;
+        return mReply;
     }
 
+    @Nullable
     public Throwable getThrowable() {
-        return throwable;
+        return mThrowable;
     }
 
+    @Nullable
     public Object getReplyObj() {
-        if (replyObj == null && reply != null) {
-            replyObj = ParcelableUtil.readValue(reply);
+        if (mReplyObj == null && mReply != null) {
+            mReplyObj = ParcelableUtil.readValue(mReply);
         }
-        return replyObj;
+        return mReplyObj;
     }
 
     public void setReply(byte[] reply) {
-        this.reply = reply;
+        this.mReply = reply;
     }
 
     public void setThrowable(Throwable throwable) {
-        this.throwable = throwable;
+        this.mThrowable = throwable;
     }
 
     @Override
@@ -43,15 +50,15 @@ public class CallerResult implements Parcelable {
 
     @Override
     public void writeToParcel(@NonNull Parcel dest, int flags) {
-        dest.writeByteArray(this.reply);
-        dest.writeSerializable(this.throwable);
+        dest.writeByteArray(this.mReply);
+        dest.writeSerializable(this.mThrowable);
     }
 
     public CallerResult() {}
 
     protected CallerResult(@NonNull Parcel in) {
-        this.reply = in.createByteArray();
-        this.throwable = (Throwable) in.readSerializable();
+        this.mReply = in.createByteArray();
+        this.mThrowable = (Throwable) in.readSerializable();
     }
 
     public static final Creator<CallerResult> CREATOR = new Creator<CallerResult>() {
@@ -73,7 +80,7 @@ public class CallerResult implements Parcelable {
     public String toString() {
         return "CallerResult{" +
                 "reply=" + getReplyObj() +
-                ", throwable=" + throwable +
+                ", throwable=" + mThrowable +
                 '}';
     }
 }

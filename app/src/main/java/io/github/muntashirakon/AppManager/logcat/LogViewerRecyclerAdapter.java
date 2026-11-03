@@ -3,112 +3,238 @@
 package io.github.muntashirakon.AppManager.logcat;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.LayoutInflater;
+import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Filter;
 import android.widget.Filterable;
-import android.widget.PopupMenu;
 import android.widget.TextView;
 
+import androidx.annotation.ColorInt;
 import androidx.annotation.GuardedBy;
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.appcompat.widget.PopupMenu;
 import androidx.collection.SparseArrayCompat;
 import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.DiffUtil;
+import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import io.github.muntashirakon.AppManager.BuildConfig;
 import io.github.muntashirakon.AppManager.R;
 import io.github.muntashirakon.AppManager.logcat.struct.LogLine;
 import io.github.muntashirakon.AppManager.logcat.struct.SearchCriteria;
 import io.github.muntashirakon.AppManager.logs.Log;
-import io.github.muntashirakon.AppManager.utils.AppPref;
-import io.github.muntashirakon.AppManager.utils.UIUtils;
+import io.github.muntashirakon.AppManager.settings.Prefs;
+import io.github.muntashirakon.AppManager.utils.Utils;
+import io.github.muntashirakon.util.AccessibilityUtils;
+import io.github.muntashirakon.util.AdapterUtils;
+import io.github.muntashirakon.widget.MultiSelectionView;
 
 // Copyright 2012 Nolan Lawson
-public class LogViewerRecyclerAdapter extends RecyclerView.Adapter<LogViewerRecyclerAdapter.ViewHolder>
+// Copyright 2021 Muntashir Al-Islam
+public class LogViewerRecyclerAdapter extends MultiSelectionView.Adapter<LogLine, LogViewerRecyclerAdapter.ViewHolder>
         implements Filterable {
     public static final String TAG = LogViewerRecyclerAdapter.class.getSimpleName();
 
     private static final SparseArrayCompat<Integer> BACKGROUND_COLORS = new SparseArrayCompat<Integer>(7) {
         {
-            put(android.util.Log.VERBOSE, R.color.the_brown_shirts);
-            put(android.util.Log.DEBUG, R.color.night_blue_shadow);
-            put(android.util.Log.INFO, R.color.blue_popsicle);
-            put(android.util.Log.WARN, R.color.red_orange);
-            put(android.util.Log.ERROR, R.color.pure_red);
-            put(android.util.Log.ASSERT, R.color.pure_red);
-            put(LogLine.LOG_FATAL, R.color.electric_red);
+            put(android.util.Log.VERBOSE, io.github.muntashirakon.ui.R.color.the_brown_shirts);
+            put(android.util.Log.DEBUG, io.github.muntashirakon.ui.R.color.night_blue_shadow);
+            put(android.util.Log.INFO, io.github.muntashirakon.ui.R.color.blue_popsicle);
+            put(android.util.Log.WARN, io.github.muntashirakon.ui.R.color.red_orange);
+            put(android.util.Log.ERROR, io.github.muntashirakon.ui.R.color.pure_red);
+            put(android.util.Log.ASSERT, io.github.muntashirakon.ui.R.color.pure_red);
+            put(LogLine.LOG_FATAL, io.github.muntashirakon.ui.R.color.electric_red);
         }
     };
 
     private static final SparseArrayCompat<Integer> FOREGROUND_COLORS = new SparseArrayCompat<Integer>(7) {
         {
-            put(android.util.Log.VERBOSE, R.color.brian_wrinkle_white);
-            put(android.util.Log.DEBUG, R.color.brian_wrinkle_white);
-            put(android.util.Log.INFO, R.color.brian_wrinkle_white);
-            put(android.util.Log.WARN, R.color.brian_wrinkle_white);
-            put(android.util.Log.ERROR, R.color.brian_wrinkle_white);
-            put(android.util.Log.ASSERT, R.color.brian_wrinkle_white);
-            put(LogLine.LOG_FATAL, R.color.brian_wrinkle_white);
+            put(android.util.Log.VERBOSE, io.github.muntashirakon.ui.R.color.brian_wrinkle_white);
+            put(android.util.Log.DEBUG, io.github.muntashirakon.ui.R.color.brian_wrinkle_white);
+            put(android.util.Log.INFO, io.github.muntashirakon.ui.R.color.brian_wrinkle_white);
+            put(android.util.Log.WARN, io.github.muntashirakon.ui.R.color.brian_wrinkle_white);
+            put(android.util.Log.ERROR, io.github.muntashirakon.ui.R.color.brian_wrinkle_white);
+            put(android.util.Log.ASSERT, io.github.muntashirakon.ui.R.color.brian_wrinkle_white);
+            put(LogLine.LOG_FATAL, io.github.muntashirakon.ui.R.color.brian_wrinkle_white);
         }
     };
 
-    private static int[] tagColors;
+    private static int[] sTagColors;
 
+    @ColorInt
     private static int getBackgroundColorForLogLevel(Context context, int logLevel) {
         Integer result = BACKGROUND_COLORS.get(logLevel);
-        if (result == null) result = UIUtils.getPrimaryColor(context);
+        if (result == null) {
+            throw new IllegalArgumentException("Invalid log level: " + logLevel);
+        }
         return ContextCompat.getColor(context, result);
     }
 
+    @ColorInt
     private static int getForegroundColorForLogLevel(Context context, int logLevel) {
         Integer result = FOREGROUND_COLORS.get(logLevel);
-        if (result == null) result = UIUtils.getTextColorPrimary(context);
+        if (result == null) {
+            throw new IllegalArgumentException("Invalid log level: " + logLevel);
+        }
         return ContextCompat.getColor(context, result);
     }
 
     private static synchronized int getOrCreateTagColor(Context context, String tag) {
-        if (tagColors == null) {
-            tagColors = context.getResources().getIntArray(R.array.random_colors);
+        if (sTagColors == null) {
+            sTagColors = context.getResources().getIntArray(R.array.random_colors);
         }
         // Ensure consistency
         int hashCode = (tag == null) ? 0 : tag.hashCode();
-        int smear = Math.abs(hashCode) % tagColors.length;
-        return tagColors[smear];
+        int smear = Math.abs(hashCode) % sTagColors.length;
+        return sTagColors[smear];
     }
 
+    private static final DiffUtil.ItemCallback<LogLine> DIFF_CALLBACK = new DiffUtil.ItemCallback<LogLine>() {
+        @Override
+        public boolean areItemsTheSame(@NonNull LogLine oldItem, @NonNull LogLine newItem) {
+            return oldItem == newItem;
+        }
+
+        @Override
+        public boolean areContentsTheSame(@NonNull LogLine oldItem, @NonNull LogLine newItem) {
+            return true;
+        }
+    };
+
     /**
-     * Lock used to modify the content of {@link #mObjects}. Any write operation
-     * performed on the array should be synchronized on this lock. This lock is also
-     * used by the filter (see {@link #getFilter()} to make a synchronized copy of
-     * the original array of data.
+     * Lock used to modify the content of {@link #mMasterList}. Any write operation
+     * performed on the array should be synchronized on this lock.
      */
     private final Object mLock = new Object();
-    /**
-     * Contains the list of objects that represent the data of this ArrayAdapter.
-     * The content of this list is referred to as "the array" in the documentation.
-     */
     @GuardedBy("mLock")
-    private List<LogLine> mObjects;
+    private final List<LogLine> mMasterList = new ArrayList<>();
+    @GuardedBy("mLock")
+    private final List<LogLine> mVisibleList = new ArrayList<>();
+    @GuardedBy("mLock")
+    private SearchCriteria mCurrentSearchCriteria = null;
+    @GuardedBy("mLock")
+    private boolean mIsUpdateScheduled = false;
+    @GuardedBy("mLock")
+    private boolean mHasPendingUpdate = false;
 
-    private ViewHolder.OnClickListener mClickListener;
-
-    private ArrayList<LogLine> mOriginalValues;
+    private ViewHolder.OnSearchByClickListener mSearchByClickListener;
     private ArrayFilter mFilter;
 
-    private int logLevelLimit = AppPref.getInt(AppPref.PrefKey.PREF_LOG_VIEWER_DEFAULT_LOG_LEVEL_INT);
+    private int mLogLevelLimit = Prefs.LogViewer.getLogLevel();
+    private final Set<LogLine> mSelectedLogLines = new LinkedHashSet<>();
+
+    private RecyclerView mAttachedRecyclerView;
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+    private boolean mAutoScroll = true;
+    private final RecyclerView.OnScrollListener mScrollListener = new RecyclerView.OnScrollListener() {
+        @Override
+        public void onScrollStateChanged(@NonNull RecyclerView recyclerView, int newState) {
+            if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                mAutoScroll = isUserAtBottom();
+            }
+        }
+
+        @Override
+        public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+            if (dy < 0) {
+                // User manually scrolled up
+                mAutoScroll = false;
+            } else if (dy > 0 && isUserAtBottom()) {
+                // User scrolled down to the bottom
+                mAutoScroll = true;
+            }
+        }
+    };
 
     public LogViewerRecyclerAdapter() {
-        mObjects = new ArrayList<>();
+        super(DIFF_CALLBACK);
         setHasStableIds(true);
     }
 
+    @Override
+    public void onAttachedToRecyclerView(@NonNull RecyclerView recyclerView) {
+        super.onAttachedToRecyclerView(recyclerView);
+        mAttachedRecyclerView = recyclerView;
+        mAttachedRecyclerView.addOnScrollListener(mScrollListener);
+    }
+
+    @Override
+    public void onDetachedFromRecyclerView(@NonNull RecyclerView recyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView);
+        if (mAttachedRecyclerView != null) {
+            mAttachedRecyclerView.removeOnScrollListener(mScrollListener);
+        }
+        mAttachedRecyclerView = null;
+    }
+
+    private boolean isUserAtBottom() {
+        if (mAttachedRecyclerView == null || mAttachedRecyclerView.getLayoutManager() == null) {
+            return false;
+        }
+        LinearLayoutManager layoutManager = (LinearLayoutManager) mAttachedRecyclerView.getLayoutManager();
+        int lastVisibleItem = layoutManager.findLastVisibleItemPosition();
+        int totalItems = layoutManager.getItemCount();
+        return totalItems == 0 || lastVisibleItem >= totalItems - 2;
+    }
+
+    private void scheduleMainThreadUpdate() {
+        synchronized (mLock) {
+            if (mIsUpdateScheduled) {
+                // A diff is currently running. Flag that we need another update
+                // once the current one finishes, then bail out.
+                mHasPendingUpdate = true;
+                return;
+            }
+            mIsUpdateScheduled = true;
+            mHasPendingUpdate = false;
+        }
+
+        Runnable updateTask = () -> {
+            List<LogLine> snapshot;
+            synchronized (mLock) {
+                snapshot = new ArrayList<>(mVisibleList);
+            }
+            // DiffUtil processes this snapshot on a background thread
+            submitList(snapshot, () -> {
+                boolean shouldRunAgain = false;
+                synchronized (mLock) {
+                    mIsUpdateScheduled = false; // Only release the lock after rendering completes
+                    if (mHasPendingUpdate) {
+                        shouldRunAgain = true;
+                    }
+                }
+                if (mAutoScroll && mAttachedRecyclerView != null) {
+                    int newCount = getItemCount();
+                    if (newCount > 0) {
+                        mAttachedRecyclerView.scrollToPosition(newCount - 1);
+                    }
+                }
+                // If logs arrived while we were diffing, trigger the next batched update immediately
+                if (shouldRunAgain) {
+                    scheduleMainThreadUpdate();
+                }
+            });
+        };
+        if (mAttachedRecyclerView != null) {
+            mAttachedRecyclerView.post(updateTask);
+        } else {
+            mMainHandler.post(updateTask);
+        }
+    }
 
     /**
      * Adds the specified object at the end of the array.
@@ -117,38 +243,30 @@ public class LogViewerRecyclerAdapter extends RecyclerView.Adapter<LogViewerRecy
      */
     @GuardedBy("mLock")
     public void add(LogLine object, boolean notify) {
-        synchronized (mLock) {
-            if (mOriginalValues != null) {
-                mOriginalValues.add(object);
-            }
-            mObjects.add(object);
-            if (notify) {
-                notifyItemInserted(mObjects.size());
-            }
-        }
+        addWithFilter(object, null, notify);
     }
 
+    @GuardedBy("mLock")
+    public void readAll(LogLine object, boolean notify) {
+        addWithFilter(object, null, notify);
+    }
 
-    public void addWithFilter(LogLine object, CharSequence text, boolean notify) {
-        if (mOriginalValues != null) {
-            List<LogLine> inputList = Collections.singletonList(object);
-            if (mFilter == null) {
-                mFilter = new ArrayFilter();
-            }
-            List<LogLine> filteredObjects = mFilter.performFilteringOnList(inputList, text);
-            synchronized (mLock) {
-                mOriginalValues.add(object);
-                mObjects.addAll(filteredObjects);
-                if (notify) {
-                    notifyItemRangeInserted(mObjects.size() - filteredObjects.size(), filteredObjects.size());
+    public void addWithFilter(@NonNull LogLine object, @Nullable SearchCriteria ignoredCriteria, boolean notify) {
+        synchronized (mLock) {
+            mMasterList.add(object);
+            boolean matches = false;
+            if (object.getLogLevel() >= mLogLevelLimit) {
+                if (mCurrentSearchCriteria == null || mCurrentSearchCriteria.isEmpty()) {
+                    matches = true;
+                } else if (mCurrentSearchCriteria.matches(object)) {
+                    matches = true;
                 }
             }
-        } else {
-            synchronized (mLock) {
-                mObjects.add(object);
-                if (notify) {
-                    notifyItemInserted(mObjects.size());
-                }
+            if (matches) {
+                mVisibleList.add(object);
+            }
+            if (notify) {
+                scheduleMainThreadUpdate();
             }
         }
     }
@@ -162,12 +280,13 @@ public class LogViewerRecyclerAdapter extends RecyclerView.Adapter<LogViewerRecy
     @GuardedBy("mLock")
     public void insert(LogLine object, int index) {
         synchronized (mLock) {
-            if (mOriginalValues != null) {
-                mOriginalValues.add(index, object);
-            } else {
-                mObjects.add(index, object);
+            if (index >= 0 && index <= mMasterList.size()) {
+                mMasterList.add(index, object);
+                if (mFilter == null) {
+                    mFilter = new ArrayFilter();
+                }
+                mFilter.filter(mCurrentSearchCriteria != null ? mCurrentSearchCriteria.query : null);
             }
-            notifyDataSetChanged();
         }
     }
 
@@ -179,81 +298,129 @@ public class LogViewerRecyclerAdapter extends RecyclerView.Adapter<LogViewerRecy
     @GuardedBy("mLock")
     public void remove(LogLine object) {
         synchronized (mLock) {
-            if (mOriginalValues != null) {
-                mOriginalValues.remove(object);
-            } else {
-                mObjects.remove(object);
-            }
-            notifyDataSetChanged();
+            mMasterList.remove(object);
+            mVisibleList.remove(object);
+            scheduleMainThreadUpdate();
         }
     }
 
     public void removeFirst(int n) {
         StopWatch stopWatch = new StopWatch("removeFirst()");
-        if (mOriginalValues != null) {
-            synchronized (mLock) {
-                List<LogLine> subList = mOriginalValues.subList(n, mOriginalValues.size());
-                for (int i = 0; i < n; i++) {
-                    mObjects.remove(mOriginalValues.get(i));
-                }
-                mOriginalValues = new ArrayList<>(subList);
-            }
-        } else {
-            synchronized (mLock) {
-                mObjects = new ArrayList<>(mObjects.subList(n, mObjects.size()));
+        synchronized (mLock) {
+            if (mMasterList.size() >= n) {
+                List<LogLine> toRemove = mMasterList.subList(0, n);
+                mVisibleList.removeAll(new HashSet<>(toRemove));
+                toRemove.clear();
+                scheduleMainThreadUpdate();
             }
         }
-        notifyDataSetChanged();
         stopWatch.log();
     }
 
-    /**
-     * Remove all elements from the list.
-     */
     @GuardedBy("mLock")
     public void clear() {
         synchronized (mLock) {
-            if (mOriginalValues != null) {
-                mOriginalValues.clear();
-            }
-            mObjects.clear();
-            notifyDataSetChanged();
+            mMasterList.clear();
+            mVisibleList.clear();
+            scheduleMainThreadUpdate();
         }
+    }
+
+    @Nullable
+    @GuardedBy("mLock")
+    private LogLine getItemSafe(int position) {
+        List<LogLine> current = getCurrentList();
+        if (position >= 0 && position < current.size()) {
+            return current.get(position);
+        }
+        return null;
     }
 
     @GuardedBy("mLock")
-    public LogLine getItem(int position) {
+    public int getRealSize() {
         synchronized (mLock) {
-            return mObjects.get(position);
+            return mMasterList.size();
         }
     }
 
-    public List<LogLine> getTrueValues() {
-        return mOriginalValues != null ? mOriginalValues : mObjects;
+    public Set<LogLine> getSelectedLogLines() {
+        return mSelectedLogLines;
+    }
+
+    @GuardedBy("mLock")
+    public void setCollapseMode(boolean isCollapsed) {
+        synchronized (mLock) {
+            for (LogLine logLine : mMasterList) {
+                logLine.setExpanded(!isCollapsed);
+            }
+            scheduleMainThreadUpdate();
+        }
+    }
+
+    @Override
+    protected boolean select(int position) {
+        synchronized (mSelectedLogLines) {
+            LogLine logLine = getItemSafe(position);
+            if (logLine != null) {
+                mSelectedLogLines.add(logLine);
+            }
+            return logLine != null;
+        }
+    }
+
+    @Override
+    protected boolean deselect(int position) {
+        synchronized (mSelectedLogLines) {
+            LogLine logLine = getItemSafe(position);
+            if (logLine != null) {
+                return mSelectedLogLines.remove(logLine);
+            }
+            return false;
+        }
+    }
+
+    @Override
+    protected boolean isSelected(int position) {
+        synchronized (mSelectedLogLines) {
+            LogLine logLine = getItemSafe(position);
+            if (logLine != null) {
+                return mSelectedLogLines.contains(logLine);
+            }
+            return false;
+        }
+    }
+
+    @Override
+    protected void cancelSelection() {
+        super.cancelSelection();
+        synchronized (mSelectedLogLines) {
+            mSelectedLogLines.clear();
+        }
+    }
+
+    @Override
+    protected int getSelectedItemCount() {
+        synchronized (mSelectedLogLines) {
+            return mSelectedLogLines.size();
+        }
+    }
+
+    @Override
+    protected int getTotalItemCount() {
+        return getItemCount();
     }
 
     @NonNull
     @Override
     public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_logcat, parent, false);
-        return new ViewHolder(v, mClickListener);
+        return new ViewHolder(v);
     }
 
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         Context context = holder.itemView.getContext();
-        LogLine logLine;
-        try {
-            logLine = getItem(position);
-        } catch (IndexOutOfBoundsException ignore) {
-            // XXX hack - I sometimes get array index out of bounds exceptions here
-            // no idea how to solve it, so this is the best I can do
-            // FIXME
-            logLine = LogLine.newLogLine("",
-                    AppPref.getBoolean(AppPref.PrefKey.PREF_LOG_VIEWER_EXPAND_BY_DEFAULT_BOOL),
-                    AppPref.getString(AppPref.PrefKey.PREF_LOG_VIEWER_FILTER_PATTERN_STR));
-        }
-
+        LogLine logLine = getItem(position);
         holder.logLine = logLine;
 
         int levelColor = getBackgroundColorForLogLevel(context, logLine.getLogLevel());
@@ -263,11 +430,12 @@ public class LogViewerRecyclerAdapter extends RecyclerView.Adapter<LogViewerRecy
         t.setTextColor(getForegroundColorForLogLevel(context, logLine.getLogLevel()));
         t.setVisibility(logLine.getLogLevel() == -1 ? View.GONE : View.VISIBLE);
 
-        View contentView = holder.itemView.findViewById(R.id.log_content);
-        contentView.setBackgroundResource(logLine.isHighlighted() ? R.drawable.item_highlight : (position % 2 == 0 ?
-                R.drawable.item_semi_transparent : R.drawable.item_transparent));
+        holder.itemView.setBackgroundResource(0);
+        holder.contentView.setBackgroundResource(position % 2 == 0
+                ? io.github.muntashirakon.ui.R.drawable.item_semi_transparent
+                : io.github.muntashirakon.ui.R.drawable.item_transparent);
 
-        //OUTPUT TEXT VIEW
+        // Display message
         TextView output = holder.output;
         output.setSingleLine(!logLine.isExpanded());
         output.setText(logLine.getLogOutput());
@@ -275,49 +443,112 @@ public class LogViewerRecyclerAdapter extends RecyclerView.Adapter<LogViewerRecy
         //TAG TEXT VIEW
         TextView tag = holder.tag;
         tag.setSingleLine(!logLine.isExpanded());
-        tag.setText(logLine.getTag());
+        tag.setText(logLine.getTagName());
         tag.setVisibility(logLine.getLogLevel() == -1 ? View.GONE : View.VISIBLE);
 
         //EXPANDED INFO
-        boolean extraInfoIsVisible = logLine.isExpanded() && logLine.getProcessId() != -1 // -1 marks lines like 'beginning of /dev/log...'
-                && AppPref.getBoolean(AppPref.PrefKey.PREF_LOG_VIEWER_SHOW_PID_TID_TIMESTAMP_BOOL);
+        boolean extraInfoIsVisible = logLine.isExpanded() && logLine.getPid() != -1 // -1 marks lines like 'beginning of /dev/log...'
+                && Prefs.LogViewer.showPidTidTimestamp();
 
-        TextView pidText = holder.pid;
-        pidText.setVisibility(extraInfoIsVisible ? View.VISIBLE : View.GONE);
-        TextView timestampText = holder.itemView.findViewById(R.id.timestamp_text);
-        timestampText.setVisibility(extraInfoIsVisible ? View.VISIBLE : View.GONE);
+        TextView infoText = holder.info;
+        infoText.setVisibility(extraInfoIsVisible ? View.VISIBLE : View.GONE);
 
         if (extraInfoIsVisible) {
-            pidText.setText(logLine.getProcessId() != -1 ? Integer.toString(logLine.getProcessId()) : null);
-            timestampText.setText(logLine.getTimestamp());
+            StringBuilder sb = new StringBuilder(logLine.getTimestamp());
+            if (logLine.getPid() >= 0) {
+                sb.append(" • ").append(logLine.getPid());
+            }
+            if (logLine.getUidOwner() != null) {
+                sb.append(" • ").append(logLine.getUidOwner());
+            }
+            if (logLine.getPackageName() != null) {
+                sb.append(" • ").append(logLine.getPackageName());
+            }
+            infoText.setText(sb);
         }
 
-        tag.setTextColor(getOrCreateTagColor(context, logLine.getTag()));
+        tag.setTextColor(getOrCreateTagColor(context, logLine.getTagName()));
+        // Single click on the item:
+        // 1. If it is in selection mode, select the item
+        // 2. Otherwise, expand the item
+        holder.itemView.setOnClickListener(v -> {
+            int currentPos = holder.getBindingAdapterPosition();
+            if (currentPos == RecyclerView.NO_POSITION) return;
+            if (isInSelectionMode()) {
+                toggleSelection(currentPos);
+                AccessibilityUtils.requestAccessibilityFocus(holder.itemView);
+            } else {
+                LogLine line = holder.logLine;
+                line.setExpanded(!line.isExpanded());
+                notifyItemChanged(currentPos, AdapterUtils.STUB);
+            }
+        });
+        // Long click on the item:
+        // 1. If it is in selection mode, select range of item
+        // 2. Open context menu
+        holder.itemView.setOnLongClickListener(v -> {
+            int currentPos = holder.getBindingAdapterPosition();
+            if (currentPos == RecyclerView.NO_POSITION) return false;
+            if (isInSelectionMode()) {
+                int lastSelectedItemPosition = getLastSelectedItemPosition();
+                if (lastSelectedItemPosition >= 0) {
+                    // Select from last selection to this selection
+                    selectRange(lastSelectedItemPosition, currentPos);
+                } else {
+                    toggleSelection(currentPos);
+                    AccessibilityUtils.requestAccessibilityFocus(holder.itemView);
+                }
+                return true;
+            }
+            PopupMenu popupMenu = new PopupMenu(v.getContext(), v);
+            popupMenu.setForceShowIcon(true);
+            Menu menu = popupMenu.getMenu();
+            menu.add(R.string.filter_choice)
+                    .setIcon(io.github.muntashirakon.ui.R.drawable.ic_search)
+                    .setOnMenuItemClickListener(menuItem -> {
+                        if (mSearchByClickListener != null) {
+                            return mSearchByClickListener.onSearchByClick(menuItem, holder.logLine);
+                        }
+                        return true;
+                    });
+            menu.add(R.string.copy_to_clipboard)
+                    .setIcon(R.drawable.ic_content_copy)
+                    .setOnMenuItemClickListener(menuItem -> {
+                        Utils.copyToClipboard(context, null, holder.logLine.getOriginalLine());
+                        return true;
+                    });
+            menu.add(R.string.item_select)
+                    .setIcon(R.drawable.ic_check_circle)
+                    .setOnMenuItemClickListener(menuItem -> {
+                        toggleSelection(currentPos);
+                        AccessibilityUtils.requestAccessibilityFocus(holder.itemView);
+                        return true;
+                    });
+            popupMenu.show();
+            return true;
+        });
+        super.onBindViewHolder(holder, position);
     }
 
-    @GuardedBy("mLock")
     @Override
     public long getItemId(int position) {
-        synchronized (mLock) {
-            return mObjects.get(position).getOriginalLine().hashCode();
-        }
-    }
-
-    @GuardedBy("mLock")
-    @Override
-    public int getItemCount() {
-        synchronized (mLock) {
-            return mObjects.size();
-        }
+        LogLine item = getItemSafe(position);
+        // identityHashCode guarantees uniqueness even if log texts are identical
+        return item != null ? System.identityHashCode(item) : RecyclerView.NO_ID;
     }
 
     public int getLogLevelLimit() {
-        return logLevelLimit;
+        return mLogLevelLimit;
     }
 
-
     public void setLogLevelLimit(int logLevelLimit) {
-        this.logLevelLimit = logLevelLimit;
+        synchronized (mLock) {
+            mLogLevelLimit = logLevelLimit;
+        }
+        if (mFilter == null) {
+            mFilter = new ArrayFilter();
+        }
+        mFilter.filter(mCurrentSearchCriteria != null ? mCurrentSearchCriteria.query : null);
     }
 
     /**
@@ -331,12 +562,26 @@ public class LogViewerRecyclerAdapter extends RecyclerView.Adapter<LogViewerRecy
         return mFilter;
     }
 
-    public List<LogLine> getObjects() {
-        return mObjects;
+    public void setClickListener(ViewHolder.OnSearchByClickListener clickListener) {
+        mSearchByClickListener = clickListener;
     }
 
-    public void setClickListener(ViewHolder.OnClickListener clickListener) {
-        mClickListener = clickListener;
+    private int getLastSelectedItemPosition() {
+        // Last selected item is the same as the last added item.
+        Iterator<LogLine> it = mSelectedLogLines.iterator();
+        LogLine lastItem = null;
+        while (it.hasNext()) {
+            lastItem = it.next();
+        }
+        if (lastItem != null) {
+            List<LogLine> visibleList = getCurrentList();
+            for (int i = 0; i < visibleList.size(); i++) {
+                if (visibleList.get(i) == lastItem) {
+                    return i;
+                }
+            }
+        }
+        return -1;
     }
 
     /**
@@ -349,43 +594,30 @@ public class LogViewerRecyclerAdapter extends RecyclerView.Adapter<LogViewerRecy
         @Override
         protected FilterResults performFiltering(CharSequence prefix) {
             FilterResults results = new FilterResults();
-
-            if (mOriginalValues == null) {
-                synchronized (mLock) {
-                    mOriginalValues = new ArrayList<>(mObjects);
-                }
+            SearchCriteria searchCriteria = new SearchCriteria(prefix != null ? prefix.toString() : null);
+            List<LogLine> filtered;
+            synchronized (mLock) {
+                mCurrentSearchCriteria = searchCriteria;
+                filtered = performFilteringOnList(mMasterList, searchCriteria);
             }
-
-            ArrayList<LogLine> allValues = performFilteringOnList(mOriginalValues, prefix);
-
-            results.values = allValues;
-            results.count = allValues.size();
-
+            results.values = filtered;
+            results.count = filtered.size();
             return results;
         }
 
-        public ArrayList<LogLine> performFilteringOnList(List<LogLine> inputList, CharSequence query) {
-            SearchCriteria searchCriteria = new SearchCriteria(query);
-
+        public ArrayList<LogLine> performFilteringOnList(List<LogLine> inputList, @Nullable SearchCriteria searchCriteria) {
             // search by log level
             ArrayList<LogLine> allValues = new ArrayList<>();
-
-            ArrayList<LogLine> logLines;
-            synchronized (mLock) {
-                logLines = new ArrayList<>(inputList);
-            }
-
-            for (LogLine logLine : logLines) {
-                if (logLine != null && logLine.getLogLevel() >= logLevelLimit) {
+            for (LogLine logLine : inputList) {
+                if (logLine != null && logLine.getLogLevel() >= mLogLevelLimit) {
                     allValues.add(logLine);
                 }
             }
             ArrayList<LogLine> finalValues = allValues;
 
             // search by criteria
-            if (!searchCriteria.isEmpty()) {
-                final int count = allValues.size();
-                final ArrayList<LogLine> newValues = new ArrayList<>(count);
+            if (searchCriteria != null && !searchCriteria.isEmpty()) {
+                final ArrayList<LogLine> newValues = new ArrayList<>();
                 for (final LogLine value : allValues) {
                     // search the logline based on the criteria
                     if (searchCriteria.matches(value)) {
@@ -401,79 +633,50 @@ public class LogViewerRecyclerAdapter extends RecyclerView.Adapter<LogViewerRecy
         @Override
         protected void publishResults(CharSequence constraint, FilterResults results) {
             synchronized (mLock) {
-                mObjects = (List<LogLine>) results.values;
+                mVisibleList.clear();
+                if (results.values != null) {
+                    mVisibleList.addAll((List<LogLine>) results.values);
+                }
+                scheduleMainThreadUpdate();
             }
-            notifyDataSetChanged();
         }
     }
 
     private static class StopWatch {
-        private long startTime;
-        private String name;
+        private long mStartTime;
+        private String mName;
 
         public StopWatch(String name) {
             if (BuildConfig.DEBUG) {
-                this.name = name;
-                this.startTime = System.currentTimeMillis();
+                mName = name;
+                mStartTime = System.currentTimeMillis();
             }
         }
 
         public void log() {
-            Log.d(TAG, name + " took " + (System.currentTimeMillis() - startTime) + " ms");
+            Log.d(TAG, "%s took %d ms", mName, (System.currentTimeMillis() - mStartTime));
         }
     }
 
-    public static class ViewHolder extends RecyclerView.ViewHolder implements PopupMenu.OnMenuItemClickListener,
-            View.OnClickListener, View.OnLongClickListener {
-        // id for context menu entry
-        public static final int CONTEXT_MENU_FILTER_ID = 0;
-        public static final int CONTEXT_MENU_COPY_ID = 1;
-
+    public static class ViewHolder extends MultiSelectionView.ViewHolder {
         LogLine logLine;
+        View contentView;
         TextView logLevel;
         TextView tag;
         TextView output;
-        TextView pid;
+        TextView info;
 
-        private final ViewHolder.OnClickListener clickListener;
-
-        public ViewHolder(View itemView, final ViewHolder.OnClickListener clickListener) {
+        public ViewHolder(View itemView) {
             super(itemView);
+            contentView = itemView.findViewById(R.id.log_content);
             logLevel = itemView.findViewById(R.id.log_level_text);
             tag = itemView.findViewById(R.id.tag_text);
             output = itemView.findViewById(R.id.log_output_text);
-            pid = itemView.findViewById(R.id.pid_text);
-
-            this.clickListener = clickListener;
-
-            itemView.setOnClickListener(this);
-            itemView.setOnLongClickListener(this);
+            info = itemView.findViewById(R.id.info);
         }
 
-        @Override
-        public void onClick(View v) {
-            clickListener.onClick(v, logLine);
-        }
-
-        @Override
-        public boolean onLongClick(View v) {
-            PopupMenu menu = new PopupMenu(v.getContext(), v);
-            menu.getMenu().add(0, CONTEXT_MENU_FILTER_ID, 0, R.string.filter_choice);
-            menu.getMenu().add(0, CONTEXT_MENU_COPY_ID, 0, R.string.copy_to_clipboard);
-            menu.setOnMenuItemClickListener(this);
-            menu.show();
-            return true;
-        }
-
-        @Override
-        public boolean onMenuItemClick(MenuItem item) {
-            return clickListener.onMenuItemClick(item, logLine);
-        }
-
-        public interface OnClickListener {
-            void onClick(View itemView, LogLine logLine);
-
-            boolean onMenuItemClick(MenuItem item, LogLine logLine);
+        public interface OnSearchByClickListener {
+            boolean onSearchByClick(MenuItem item, LogLine logLine);
         }
     }
 }

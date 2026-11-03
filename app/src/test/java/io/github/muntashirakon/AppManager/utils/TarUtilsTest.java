@@ -2,14 +2,18 @@
 
 package io.github.muntashirakon.AppManager.utils;
 
-import android.content.Context;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.apache.commons.compress.archivers.ArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -17,24 +21,21 @@ import org.robolectric.RobolectricTestRunner;
 
 import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import io.github.muntashirakon.AppManager.AppManager;
+import io.github.muntashirakon.io.IoUtils;
 import io.github.muntashirakon.io.Path;
+import io.github.muntashirakon.io.Paths;
 import io.github.muntashirakon.io.SplitInputStream;
-
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
 
 @RunWith(RobolectricTestRunner.class)
 public class TarUtilsTest {
     private final ClassLoader classLoader = getClass().getClassLoader();
-    private final Context context = AppManager.getContext();
     private Path testRoot;
     private Path tmpRoot;
     private Path[] tarGzFilesForExtractTest;
@@ -43,12 +44,12 @@ public class TarUtilsTest {
     public void setUp() throws Throwable {
         assert classLoader != null;
         List<Path> resFiles = new ArrayList<>();
-        resFiles.add(new Path(context, new File(classLoader.getResource("plain.txt").getFile())));
-        resFiles.add(new Path(context, new File(classLoader.getResource("raw/exclude.txt").getFile())));
-        resFiles.add(new Path(context, new File(classLoader.getResource("raw/include.txt").getFile())));
-        resFiles.add(new Path(context, new File(classLoader.getResource("prefixed/prefixed_exclude.txt").getFile())));
-        resFiles.add(new Path(context, new File(classLoader.getResource("prefixed/prefixed_include.txt").getFile())));
-        tmpRoot = new Path(context, new File("/tmp"));
+        resFiles.add(Paths.get(classLoader.getResource("plain.txt").getFile()));
+        resFiles.add(Paths.get(classLoader.getResource("raw/exclude.txt").getFile()));
+        resFiles.add(Paths.get(classLoader.getResource("raw/include.txt").getFile()));
+        resFiles.add(Paths.get(classLoader.getResource("prefixed/prefixed_exclude.txt").getFile()));
+        resFiles.add(Paths.get(classLoader.getResource("prefixed/prefixed_include.txt").getFile()));
+        tmpRoot = Paths.get("/tmp");
         List<Path> tmpFiles = new ArrayList<>();
         testRoot = tmpRoot.findOrCreateDirectory("test");
         testRoot.findOrCreateDirectory("raw");
@@ -60,10 +61,19 @@ public class TarUtilsTest {
         tmpFiles.add(testRoot.findOrCreateDirectory("prefixed").findOrCreateFile("prefixed_include.txt", null));
         // Copy files to tmpRoot
         for (int i = 0; i < resFiles.size(); ++i) {
-            FileUtils.copy(resFiles.get(i), tmpFiles.get(i));
+            IoUtils.copy(resFiles.get(i), tmpFiles.get(i));
         }
         tarGzFilesForExtractTest = TarUtils.create(TarUtils.TAR_GZIP, testRoot, tmpRoot, "am_ex.tar.gz",
                 null, null, null, false).toArray(new Path[0]);
+    }
+
+    @After
+    public void tearDown() throws FileNotFoundException {
+        testRoot.delete();
+        tarGzFilesForExtractTest[0].delete();
+        if (tmpRoot.hasFile("am.tar.gz.0")) {
+            tmpRoot.findFile("am.tar.gz.0").delete();
+        }
     }
 
     @Test
@@ -87,7 +97,7 @@ public class TarUtilsTest {
     @Test
     public void testExtractTarGZipWithDirectoryFilter() throws Throwable {
         extractTest(tarGzFilesForExtractTest, testRoot, /* language=regexp */ new String[]{"prefixed/.*"}, null,
-                Arrays.asList("", "prefixed/", "prefixed/prefixed_include.txt", "prefixed/prefixed_exclude.txt"));
+                Arrays.asList("", "prefixed/", "prefixed/prefixed_include.txt", "prefixed/prefixed_exclude.txt", "raw/"));
     }
 
     @Test
@@ -194,7 +204,7 @@ public class TarUtilsTest {
     public void testExtractTarGZipWithFilterAndExcludeContainingDirectory() throws Throwable {
         extractTest(tarGzFilesForExtractTest, testRoot, /* language=regexp */ new String[]{".*\\.txt", "include/.*"},
                 /* language=regexp */ new String[]{".*exclude\\.txt", "raw/.*"}, Arrays.asList("", "prefixed/",
-                        "prefixed/prefixed_include.txt", "plain.txt"));
+                        "prefixed/prefixed_include.txt", "plain.txt", "raw/"));
     }
 
     @Test
@@ -254,18 +264,18 @@ public class TarUtilsTest {
         };
         String[] actualPaths = new String[expectedPaths.length];
         for (int i = 0; i < actualPaths.length; ++i) {
-            actualPaths[i] = TarUtils.getRelativePath(absolutes[i], basePath, "/");
+            actualPaths[i] = getRelativePath(absolutes[i], basePath, "/");
         }
         assertArrayEquals(expectedPaths, actualPaths);
     }
 
     @Test
     public void testGetRelativePathsUnix() {
-        assertEquals("stuff/xyz.dat", TarUtils.getRelativePath(new File("/var/data/stuff/xyz.dat"),
+        assertEquals("stuff/xyz.dat", getRelativePath(new File("/var/data/stuff/xyz.dat"),
                 new File("/var/data/"), "/"));
-        assertEquals("../../b/c", TarUtils.getRelativePath(new File("/a/b/c"),
+        assertEquals("../../b/c", getRelativePath(new File("/a/b/c"),
                 new File("/a/x/y/"), "/"));
-        assertEquals("../../b/c", TarUtils.getRelativePath(new File("/m/n/o/a/b/c"),
+        assertEquals("../../b/c", getRelativePath(new File("/m/n/o/a/b/c"),
                 new File("/m/n/o/a/x/y/"), "/"));
     }
 
@@ -275,8 +285,8 @@ public class TarUtilsTest {
         File base = new File("C:\\Windows\\Speech\\Common\\sapisvr.exe");
         File workingBase = new File("C:\\Windows\\Speech\\Common\\");
 
-        assertNotEquals("..\\..\\Boot\\Fonts\\chs_boot.ttf", TarUtils.getRelativePath(target, base, "\\"));
-        assertEquals("..\\..\\Boot\\Fonts\\chs_boot.ttf", TarUtils.getRelativePath(target, workingBase, "\\"));
+        assertNotEquals("..\\..\\Boot\\Fonts\\chs_boot.ttf", getRelativePath(target, base, "\\"));
+        assertEquals("..\\..\\Boot\\Fonts\\chs_boot.ttf", getRelativePath(target, workingBase, "\\"));
     }
 
     @Test
@@ -284,7 +294,7 @@ public class TarUtilsTest {
         File target = new File("C:\\Windows\\Boot\\Fonts\\chs_boot.ttf");
         File base = new File("C:\\Windows\\Speech\\Common\\");
 
-        assertEquals("..\\..\\Boot\\Fonts\\chs_boot.ttf", TarUtils.getRelativePath(target, base, "\\"));
+        assertEquals("..\\..\\Boot\\Fonts\\chs_boot.ttf", getRelativePath(target, base, "\\"));
     }
 
     @Test
@@ -293,8 +303,8 @@ public class TarUtilsTest {
         File base = new File("C:\\Windows\\Speech\\Common\\foo.txt");
         File workingBase = new File("C:\\Windows\\Speech\\Common\\");
 
-        assertNotEquals("..\\..\\Boot\\Fonts", TarUtils.getRelativePath(target, base, "\\"));
-        assertEquals("..\\..\\Boot\\Fonts", TarUtils.getRelativePath(target, workingBase, "\\"));
+        assertNotEquals("..\\..\\Boot\\Fonts", getRelativePath(target, base, "\\"));
+        assertEquals("..\\..\\Boot\\Fonts", getRelativePath(target, workingBase, "\\"));
     }
 
     @Test
@@ -303,8 +313,8 @@ public class TarUtilsTest {
         File base = new File("C:\\foo.txt");
         File workingBase = new File("C:\\");
 
-        assertNotEquals("Windows\\Boot\\Fonts", TarUtils.getRelativePath(target, base, "\\"));
-        assertEquals("Windows\\Boot\\Fonts", TarUtils.getRelativePath(target, workingBase, "\\"));
+        assertNotEquals("Windows\\Boot\\Fonts", getRelativePath(target, base, "\\"));
+        assertEquals("Windows\\Boot\\Fonts", getRelativePath(target, workingBase, "\\"));
     }
 
     @Test
@@ -313,7 +323,7 @@ public class TarUtilsTest {
         File base = new File("C:\\Windows\\Speech\\Common\\");
         String expected = "..\\..\\Boot\\";
 
-        String relPath = TarUtils.getRelativePath(target, base, "\\");
+        String relPath = getRelativePath(target, base, "\\");
         assertEquals(expected, relPath);
     }
 
@@ -321,7 +331,45 @@ public class TarUtilsTest {
     public void testGetRelativePathDifferentDriveLetters() {
         File target = new File("D:\\sources\\recovery\\RecEnv.exe");
         File base = new File("C:\\Java\\workspace\\AcceptanceTests\\Standard test data\\geo\\");
-        assertEquals(target.getAbsolutePath(), TarUtils.getRelativePath(target, base, "\\"));
+        assertEquals(target.getAbsolutePath(), getRelativePath(target, base, "\\"));
+    }
+
+    @Test
+    public void testGetAbsolutePathToDataApp() {
+        String[] brokenPaths = new String[]{
+                "/data/app",
+                "/data/app/",
+                "/data/app/example.app",
+                "/data/app/example.app/",
+                "/data/app/example.app/lib",
+                "/data/app/example.app/lib/",
+                "/data/app/example.app/oat",
+                "/data/app/example.app/base.apk",
+                "/data/app/~~random-things==/example.app-more_random_things==",
+                "/data/app/~~random-things==/example.app-more_random_things==/",
+                "/data/app/~~random-things==/example.app-more_random_things==/lib",
+                "/data/app/~~random-things==/example.app-more_random_things==/lib/",
+                "/data/app/~~random-things==/example.app-more_random_things==/base.apk",
+        };
+        String realPath = "/data/app/~~new-random-things==/example.app-more_new_random_things==";
+        String[] expectedPaths = new String[]{
+                "/data/app",
+                "/data/app",
+                realPath,
+                realPath,
+                realPath + "/lib",
+                realPath + "/lib",
+                realPath + "/oat",
+                realPath + "/base.apk",
+                realPath,
+                realPath,
+                realPath + "/lib",
+                realPath + "/lib",
+                realPath + "/base.apk",
+        };
+        for (int i = 0; i < brokenPaths.length; ++i) {
+            assertEquals("Failed in index " + i, expectedPaths[i], TarUtils.getAbsolutePathToDataApp(brokenPaths[i], realPath));
+        }
     }
 
     @NonNull
@@ -331,6 +379,20 @@ public class TarUtilsTest {
              BufferedInputStream bis = new BufferedInputStream(sis);
              GzipCompressorInputStream gis = new GzipCompressorInputStream(bis, true);
              TarArchiveInputStream tis = new TarArchiveInputStream(gis)) {
+            ArchiveEntry entry;
+            while ((entry = tis.getNextEntry()) != null) {
+                fileNames.add(entry.getName());
+            }
+        }
+        return fileNames;
+    }
+
+    @NonNull
+    public static List<String> getFileNamesNoCompress(@NonNull List<Path> tarFiles) throws IOException {
+        List<String> fileNames = new ArrayList<>();
+        try (SplitInputStream sis = new SplitInputStream(tarFiles);
+             BufferedInputStream bis = new BufferedInputStream(sis);
+             TarArchiveInputStream tis = new TarArchiveInputStream(bis)) {
             ArchiveEntry entry;
             while ((entry = tis.getNextEntry()) != null) {
                 fileNames.add(entry.getName());
@@ -353,7 +415,7 @@ public class TarUtilsTest {
                                     @Nullable String[] exclude, @NonNull List<String> expectedPaths) throws Throwable {
         List<String> actualPaths = new ArrayList<>();
         recreateDir(testRoot);
-        TarUtils.extract(TarUtils.TAR_GZIP, sourceFiles, testRoot, include, exclude);
+        TarUtils.extract(TarUtils.TAR_GZIP, sourceFiles, testRoot, include, exclude, null);
         gatherFiles(actualPaths, testRoot, testRoot);
         Collections.sort(expectedPaths);
         Collections.sort(actualPaths);
@@ -366,7 +428,7 @@ public class TarUtilsTest {
     }
 
     private static void gatherFiles(@NonNull List<String> files, @NonNull Path basePath, @NonNull Path source) {
-        files.add(TarUtils.getRelativePath(source, basePath, File.separator));
+        files.add(Paths.relativePath(source, basePath));
         if (source.isDirectory()) {
             Path[] children = source.listFiles();
             if (children.length == 0) return;
@@ -374,5 +436,13 @@ public class TarUtilsTest {
                 gatherFiles(files, basePath, child);
             }
         }
+    }
+
+    @VisibleForTesting
+    @NonNull
+    static String getRelativePath(@NonNull File file, @NonNull File basePath, @NonNull String separator) {
+        String baseDir = basePath.toURI().getPath();
+        String targetPath = file.toURI().getPath();
+        return Paths.relativePath(targetPath, baseDir, separator);
     }
 }
